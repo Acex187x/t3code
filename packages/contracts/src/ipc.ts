@@ -69,6 +69,9 @@ import { EditorId } from "./editor.ts";
 import { ExecutionEnvironmentDescriptor } from "./environment.ts";
 import type { ClientSettings, ServerSettings, ServerSettingsPatch } from "./settings.ts";
 import type {
+  SourceControlChangeRequestReviewInput,
+  SourceControlChangeRequestReviewSnapshot,
+  SourceControlChangeRequestReviewStreamEvent,
   SourceControlCloneRepositoryInput,
   SourceControlCloneRepositoryResult,
   SourceControlDiscoveryResult,
@@ -520,6 +523,16 @@ export interface EnvironmentApi {
     publishRepository: (
       input: SourceControlPublishRepositoryInput,
     ) => Promise<SourceControlPublishRepositoryResult>;
+    getChangeRequestReviewSnapshot: (
+      input: SourceControlChangeRequestReviewInput,
+    ) => Promise<SourceControlChangeRequestReviewSnapshot>;
+    subscribeChangeRequestReviewSnapshot: (
+      input: SourceControlChangeRequestReviewInput,
+      callback: (event: SourceControlChangeRequestReviewStreamEvent) => void,
+      options?: {
+        onResubscribe?: () => void;
+      },
+    ) => () => void;
   };
   vcs: {
     listRefs: (input: VcsListRefsInput) => Promise<VcsListRefsResult>;

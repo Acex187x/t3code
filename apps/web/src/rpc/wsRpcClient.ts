@@ -2,6 +2,7 @@ import {
   type GitActionProgressEvent,
   type GitRunStackedActionInput,
   type GitRunStackedActionResult,
+  type SourceControlChangeRequestReviewStreamEvent,
   type VcsStatusResult,
   type VcsStatusStreamEvent,
   type LocalApi,
@@ -77,6 +78,12 @@ export interface WsRpcClient {
     readonly lookupRepository: RpcUnaryMethod<typeof WS_METHODS.sourceControlLookupRepository>;
     readonly cloneRepository: RpcUnaryMethod<typeof WS_METHODS.sourceControlCloneRepository>;
     readonly publishRepository: RpcUnaryMethod<typeof WS_METHODS.sourceControlPublishRepository>;
+    readonly getChangeRequestReviewSnapshot: RpcUnaryMethod<
+      typeof WS_METHODS.sourceControlGetChangeRequestReviewSnapshot
+    >;
+    readonly subscribeChangeRequestReviewSnapshot: RpcInputStreamMethod<
+      typeof WS_METHODS.subscribeChangeRequestReviewSnapshot
+    >;
   };
   readonly shell: {
     readonly openInEditor: (input: {
@@ -192,6 +199,16 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
         transport.request((client) => client[WS_METHODS.sourceControlCloneRepository](input)),
       publishRepository: (input) =>
         transport.request((client) => client[WS_METHODS.sourceControlPublishRepository](input)),
+      getChangeRequestReviewSnapshot: (input) =>
+        transport.request((client) =>
+          client[WS_METHODS.sourceControlGetChangeRequestReviewSnapshot](input),
+        ),
+      subscribeChangeRequestReviewSnapshot: (input, listener, options) =>
+        transport.subscribe(
+          (client) => client[WS_METHODS.subscribeChangeRequestReviewSnapshot](input),
+          (event: SourceControlChangeRequestReviewStreamEvent) => listener(event),
+          { ...options, tag: WS_METHODS.subscribeChangeRequestReviewSnapshot },
+        ),
     },
     shell: {
       openInEditor: (input) =>

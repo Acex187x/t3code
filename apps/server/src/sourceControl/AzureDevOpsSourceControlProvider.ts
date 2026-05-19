@@ -139,6 +139,14 @@ export const make = Effect.fn("makeAzureDevOpsSourceControlProvider")(function* 
           ...(input.context !== undefined ? { remoteName: input.context.remoteName } : {}),
         })
         .pipe(Effect.mapError((error) => providerError("checkoutChangeRequest", error))),
+    getChangeRequestReviewSnapshot: () =>
+      Effect.fail(
+        new SourceControlProviderError({
+          provider: "azure-devops",
+          operation: "getChangeRequestReviewSnapshot",
+          detail: "Azure DevOps review comment snapshots are not supported yet.",
+        }),
+      ),
   });
 });
 

@@ -74,6 +74,7 @@ function unsupportedProvider(
     createRepository: () => unsupported("createRepository"),
     getDefaultBranch: () => unsupported("getDefaultBranch"),
     checkoutChangeRequest: () => unsupported("checkoutChangeRequest"),
+    getChangeRequestReviewSnapshot: () => unsupported("getChangeRequestReviewSnapshot"),
   });
 }
 
@@ -151,6 +152,11 @@ function bindProviderContext(
       }),
     checkoutChangeRequest: (input) =>
       provider.checkoutChangeRequest({
+        ...input,
+        context: input.context ?? context,
+      }),
+    getChangeRequestReviewSnapshot: (input) =>
+      provider.getChangeRequestReviewSnapshot({
         ...input,
         context: input.context ?? context,
       }),

@@ -195,6 +195,10 @@ export const make = Effect.fn("makeGitHubSourceControlProvider")(function* () {
       github
         .checkoutPullRequest(input)
         .pipe(Effect.mapError((error) => providerError("checkoutChangeRequest", error))),
+    getChangeRequestReviewSnapshot: (input) =>
+      github
+        .getPullRequestReviewSnapshot(input)
+        .pipe(Effect.mapError((error) => providerError("getChangeRequestReviewSnapshot", error))),
   });
 });
 

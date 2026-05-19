@@ -1,4 +1,5 @@
 import * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Result from "effect/Result";
@@ -7,6 +8,7 @@ import * as SchemaIssue from "effect/SchemaIssue";
 
 import {
   TrimmedNonEmptyString,
+  type SourceControlChangeRequestReviewSnapshot,
   type SourceControlRepositoryVisibility,
   type VcsError,
 } from "@t3tools/contracts";
@@ -90,6 +92,11 @@ export interface GitHubCliShape {
     readonly reference: string;
     readonly force?: boolean;
   }) => Effect.Effect<void, GitHubCliError>;
+
+  readonly getPullRequestReviewSnapshot: (input: {
+    readonly cwd: string;
+    readonly reference: string;
+  }) => Effect.Effect<SourceControlChangeRequestReviewSnapshot, GitHubCliError>;
 }
 
 export class GitHubCli extends Context.Service<GitHubCli, GitHubCliShape>()(
@@ -159,6 +166,10 @@ const RawGitHubRepositoryCloneUrlsSchema = Schema.Struct({
   nameWithOwner: TrimmedNonEmptyString,
   url: TrimmedNonEmptyString,
   sshUrl: TrimmedNonEmptyString,
+});
+
+const RawGitHubRepositoryNameSchema = Schema.Struct({
+  nameWithOwner: TrimmedNonEmptyString,
 });
 
 function normalizeRepositoryCloneUrls(
@@ -369,7 +380,136 @@ export const make = Effect.fn("makeGitHubCli")(function* () {
         cwd: input.cwd,
         args: ["pr", "checkout", input.reference, ...(input.force ? ["--force"] : [])],
       }).pipe(Effect.asVoid),
+    getPullRequestReviewSnapshot: (input) =>
+      Effect.gen(function* () {
+        const pullRequestRaw = yield* execute({
+          cwd: input.cwd,
+          args: [
+            "pr",
+            "view",
+            input.reference,
+            "--json",
+            "number,title,url,reviewDecision,reviews,statusCheckRollup,state",
+          ],
+        }).pipe(Effect.map((result) => result.stdout.trim()));
+
+        const repository = yield* execute({
+          cwd: input.cwd,
+          args: ["repo", "view", "--json", "nameWithOwner"],
+        }).pipe(
+          Effect.map((result) => result.stdout.trim()),
+          Effect.flatMap((raw) =>
+            decodeGitHubJson(
+              raw,
+              RawGitHubRepositoryNameSchema,
+              "getPullRequest",
+              "GitHub CLI returned invalid repository JSON.",
+            ),
+          ),
+        );
+        const [owner, name] = repository.nameWithOwner.split("/", 2);
+        if (!owner || !name) {
+          return yield* new GitHubCliError({
+            operation: "getPullRequestReviewSnapshot",
+            detail: "GitHub CLI returned an invalid repository name.",
+          });
+        }
+        const pullRequestNumber = (() => {
+          try {
+            const parsed = JSON.parse(pullRequestRaw) as { number?: unknown };
+            return typeof parsed.number === "number" && Number.isInteger(parsed.number)
+              ? parsed.number
+              : null;
+          } catch {
+            return null;
+          }
+        })();
+        if (pullRequestNumber === null) {
+          return yield* new GitHubCliError({
+            operation: "getPullRequestReviewSnapshot",
+            detail: "GitHub CLI returned a pull request without a valid number.",
+          });
+        }
+
+        const reviewThreadsRaw = yield* execute({
+          cwd: input.cwd,
+          timeoutMs: 60_000,
+          args: [
+            "api",
+            "graphql",
+            "--paginate",
+            "--slurp",
+            "-f",
+            `query=${PULL_REQUEST_REVIEW_THREADS_QUERY}`,
+            "-F",
+            `owner=${owner}`,
+            "-F",
+            `name=${name}`,
+            "-F",
+            `number=${pullRequestNumber}`,
+          ],
+        }).pipe(Effect.map((result) => result.stdout.trim()));
+
+        const decoded = GitHubPullRequests.decodeGitHubPullRequestReviewSnapshot({
+          pullRequestJson: pullRequestRaw,
+          reviewThreadsJson: reviewThreadsRaw,
+        });
+        if (!Result.isSuccess(decoded)) {
+          return yield* new GitHubCliError({
+            operation: "getPullRequestReviewSnapshot",
+            detail: `GitHub CLI returned invalid review snapshot JSON: ${GitHubPullRequests.formatGitHubJsonDecodeError(decoded.failure)}`,
+            cause: decoded.failure,
+          });
+        }
+        return {
+          ...decoded.success,
+          fetchedAt: yield* DateTime.now,
+        };
+      }),
   });
 });
 
 export const layer = Layer.effect(GitHubCli, make());
+
+const PULL_REQUEST_REVIEW_THREADS_QUERY = `
+query($owner: String!, $name: String!, $number: Int!, $endCursor: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      reviewThreads(first: 100, after: $endCursor) {
+        nodes {
+          id
+          isResolved
+          isOutdated
+          path
+          line
+          startLine
+          comments(first: 100) {
+            nodes {
+              id
+              databaseId
+              author {
+                login
+              }
+              body
+              url
+              path
+              diffHunk
+              line
+              startLine
+              createdAt
+              updatedAt
+              pullRequestReview {
+                state
+              }
+            }
+          }
+        }
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
+      }
+    }
+  }
+}
+`;

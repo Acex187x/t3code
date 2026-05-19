@@ -27,6 +27,9 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       lookupRepository: rpcClient.sourceControl.lookupRepository,
       cloneRepository: rpcClient.sourceControl.cloneRepository,
       publishRepository: rpcClient.sourceControl.publishRepository,
+      getChangeRequestReviewSnapshot: rpcClient.sourceControl.getChangeRequestReviewSnapshot,
+      subscribeChangeRequestReviewSnapshot:
+        rpcClient.sourceControl.subscribeChangeRequestReviewSnapshot,
     },
     vcs: {
       pull: rpcClient.vcs.pull,

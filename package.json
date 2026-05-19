@@ -66,6 +66,7 @@
     "@types/node": "catalog:",
     "oxfmt": "^0.40.0",
     "oxlint": "^1.63.0",
+    "rehype-raw": "^7.0.0",
     "turbo": "^2.3.3",
     "typescript": "catalog:",
     "vitest": "catalog:"

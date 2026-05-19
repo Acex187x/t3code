@@ -112,6 +112,7 @@ import * as VcsDriverRegistry from "./vcs/VcsDriverRegistry.ts";
 import * as VcsProvisioningService from "./vcs/VcsProvisioningService.ts";
 import * as GitWorkflowService from "./git/GitWorkflowService.ts";
 import * as SourceControlRepositoryService from "./sourceControl/SourceControlRepositoryService.ts";
+import * as ChangeRequestReviewBroadcaster from "./sourceControl/ChangeRequestReviewBroadcaster.ts";
 import { ServerSecretStoreLive } from "./auth/Layers/ServerSecretStore.ts";
 import { ServerAuthLive } from "./auth/Layers/ServerAuth.ts";
 import * as ProcessDiagnostics from "./diagnostics/ProcessDiagnostics.ts";
@@ -327,6 +328,7 @@ const buildAppUnderTest = (options?: {
     gitManager?: Partial<GitManagerShape>;
     sourceControlRepositoryService?: Partial<SourceControlRepositoryService.SourceControlRepositoryServiceShape>;
     vcsStatusBroadcaster?: Partial<VcsStatusBroadcaster.VcsStatusBroadcasterShape>;
+    changeRequestReviewBroadcaster?: Partial<ChangeRequestReviewBroadcaster.ChangeRequestReviewBroadcasterShape>;
     projectSetupScriptRunner?: Partial<ProjectSetupScriptRunnerShape>;
     terminalManager?: Partial<TerminalManagerShape>;
     orchestrationEngine?: Partial<OrchestrationEngineShape>;
@@ -617,6 +619,11 @@ const buildAppUnderTest = (options?: {
         }),
       ),
       Layer.provideMerge(vcsStatusBroadcasterLayer),
+      Layer.provide(
+        Layer.mock(ChangeRequestReviewBroadcaster.ChangeRequestReviewBroadcaster)({
+          ...options?.layers?.changeRequestReviewBroadcaster,
+        }),
+      ),
       Layer.provide(
         Layer.mock(ProjectSetupScriptRunner)({
           runForThread: () => Effect.succeed({ status: "no-script" as const }),

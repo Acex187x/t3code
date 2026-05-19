@@ -144,6 +144,7 @@ import {
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
+import { PullRequestReviewSidebar } from "./PullRequestReviewSidebar";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
 import { MessagesTimeline } from "./chat/MessagesTimeline";
 import { ChatHeader } from "./chat/ChatHeader";
@@ -704,6 +705,10 @@ export default function ChatView(props: ChatViewProps) {
   const [pendingUserInputQuestionIndexByRequestId, setPendingUserInputQuestionIndexByRequestId] =
     useState<Record<string, number>>({});
   const [planSidebarOpen, setPlanSidebarOpen] = useState(false);
+  const [reviewSidebarOpen, setReviewSidebarOpen] = useState(false);
+  const [reviewSidebarReferenceOverride, setReviewSidebarReferenceOverride] = useState<
+    string | null
+  >(null);
   const shouldUsePlanSidebarSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
   // Tracks whether the user explicitly dismissed the sidebar for the active turn.
   const planSidebarDismissedForTurnRef = useRef<string | null>(null);
@@ -2138,6 +2143,7 @@ export default function ChatView(props: ChatViewProps) {
           activePlan?.turnId ?? sidebarProposedPlan?.turnId ?? "__dismissed__";
       } else {
         planSidebarDismissedForTurnRef.current = null;
+        setReviewSidebarOpen(false);
       }
       return !open;
     });
@@ -2147,6 +2153,20 @@ export default function ChatView(props: ChatViewProps) {
     planSidebarDismissedForTurnRef.current =
       activePlan?.turnId ?? sidebarProposedPlan?.turnId ?? "__dismissed__";
   }, [activePlan?.turnId, sidebarProposedPlan?.turnId]);
+  const openPullRequestReviewSidebar = useCallback(() => {
+    setReviewSidebarReferenceOverride(null);
+    setPlanSidebarOpen(false);
+    setReviewSidebarOpen(true);
+  }, []);
+  const openPullRequestReviewSidebarForReference = useCallback((reference: string) => {
+    setReviewSidebarReferenceOverride(reference);
+    setPlanSidebarOpen(false);
+    setReviewSidebarOpen(true);
+  }, []);
+  const closePullRequestReviewSidebar = useCallback(() => {
+    setReviewSidebarOpen(false);
+    setReviewSidebarReferenceOverride(null);
+  }, []);
 
   const persistThreadSettingsForNextTurn = useCallback(
     async (input: {
@@ -2335,10 +2355,73 @@ export default function ChatView(props: ChatViewProps) {
     canOverrideServerThreadEnvMode && pendingServerThreadBranch !== undefined
       ? pendingServerThreadBranch
       : (activeThread?.branch ?? null);
+  const activePullRequest =
+    gitStatusQuery.data?.pr?.state === "open" ? gitStatusQuery.data.pr : null;
+  const activePullRequestReviewReference = activePullRequest
+    ? String(activePullRequest.number)
+    : null;
+  const reviewSidebarReference = reviewSidebarReferenceOverride ?? activePullRequestReviewReference;
   const sendEnvMode = resolveSendEnvMode({
     requestedEnvMode: envMode,
     isGitRepo,
   });
+
+  const handleSendPullRequestReviewContext = useCallback(
+    async (markdown: string) => {
+      if (!activeThread || !activeProject) {
+        return;
+      }
+      const api = readEnvironmentApi(activeThread.environmentId);
+      if (!api) {
+        setThreadError(activeThread.id, "Environment API is unavailable.");
+        return;
+      }
+
+      const createdAt = new Date().toISOString();
+      const titleSeed = "Address PR review comments";
+      const bootstrap = isLocalDraftThread
+        ? {
+            createThread: {
+              projectId: activeProject.id,
+              title: titleSeed,
+              modelSelection: activeThread.modelSelection,
+              runtimeMode,
+              interactionMode,
+              branch: activeThreadBranch,
+              worktreePath: activeThread.worktreePath,
+              createdAt: activeThread.createdAt,
+            },
+          }
+        : undefined;
+
+      await api.orchestration.dispatchCommand({
+        type: "thread.turn.start",
+        commandId: newCommandId(),
+        threadId: activeThread.id,
+        message: {
+          messageId: newMessageId(),
+          role: "user",
+          text: markdown,
+          attachments: [],
+        },
+        modelSelection: activeThread.modelSelection,
+        titleSeed,
+        runtimeMode,
+        interactionMode,
+        ...(bootstrap ? { bootstrap } : {}),
+        createdAt,
+      });
+    },
+    [
+      activeProject,
+      activeThread,
+      activeThreadBranch,
+      interactionMode,
+      isLocalDraftThread,
+      runtimeMode,
+      setThreadError,
+    ],
+  );
 
   useEffect(() => {
     setPendingServerThreadEnvMode(null);
@@ -3537,6 +3620,7 @@ export default function ChatView(props: ChatViewProps) {
           onDeleteProjectScript={deleteProjectScript}
           onToggleTerminal={toggleTerminalVisibility}
           onToggleDiff={onToggleDiff}
+          onOpenReviewSidebar={openPullRequestReviewSidebar}
         />
       </header>
 
@@ -3717,6 +3801,7 @@ export default function ChatView(props: ChatViewProps) {
                 }
               }}
               onPrepared={handlePreparedPullRequestThread}
+              onOpenReviewSidebar={openPullRequestReviewSidebarForReference}
             />
           ) : null}
         </div>
@@ -3734,6 +3819,18 @@ export default function ChatView(props: ChatViewProps) {
             timestampFormat={timestampFormat}
             mode="sidebar"
             onClose={closePlanSidebar}
+          />
+        ) : null}
+        {reviewSidebarOpen && !shouldUsePlanSidebarSheet ? (
+          <PullRequestReviewSidebar
+            environmentId={activeThread.environmentId}
+            cwd={gitCwd}
+            reference={reviewSidebarReference}
+            markdownCwd={gitCwd ?? undefined}
+            mode="sidebar"
+            activities={activeThread.activities}
+            onClose={closePullRequestReviewSidebar}
+            onSendReviewContext={handleSendPullRequestReviewContext}
           />
         ) : null}
       </div>
@@ -3768,6 +3865,20 @@ export default function ChatView(props: ChatViewProps) {
             timestampFormat={timestampFormat}
             mode="sheet"
             onClose={closePlanSidebar}
+          />
+        </RightPanelSheet>
+      ) : null}
+      {shouldUsePlanSidebarSheet ? (
+        <RightPanelSheet open={reviewSidebarOpen} onClose={closePullRequestReviewSidebar}>
+          <PullRequestReviewSidebar
+            environmentId={activeThread.environmentId}
+            cwd={gitCwd}
+            reference={reviewSidebarReference}
+            markdownCwd={gitCwd ?? undefined}
+            mode="sheet"
+            activities={activeThread.activities}
+            onClose={closePullRequestReviewSidebar}
+            onSendReviewContext={handleSendPullRequestReviewContext}
           />
         </RightPanelSheet>
       ) : null}

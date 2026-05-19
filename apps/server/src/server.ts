@@ -58,6 +58,7 @@ import * as VcsStatusBroadcaster from "./vcs/VcsStatusBroadcaster.ts";
 import * as GitWorkflowService from "./git/GitWorkflowService.ts";
 import * as SourceControlProviderRegistry from "./sourceControl/SourceControlProviderRegistry.ts";
 import * as SourceControlRepositoryService from "./sourceControl/SourceControlRepositoryService.ts";
+import * as ChangeRequestReviewBroadcaster from "./sourceControl/ChangeRequestReviewBroadcaster.ts";
 import { ProjectSetupScriptRunnerLive } from "./project/Layers/ProjectSetupScriptRunner.ts";
 import { ObservabilityLive } from "./observability/Layers/Observability.ts";
 import { ServerEnvironmentLive } from "./environment/Layers/ServerEnvironment.ts";
@@ -206,6 +207,11 @@ const VcsLayerLive = Layer.empty.pipe(
   Layer.provideMerge(GitWorkflowLayerLive),
   Layer.provideMerge(SourceControlRepositoryServiceLayerLive),
   Layer.provideMerge(VcsStatusBroadcaster.layer.pipe(Layer.provide(GitWorkflowLayerLive))),
+  Layer.provideMerge(
+    ChangeRequestReviewBroadcaster.layer.pipe(
+      Layer.provide(SourceControlProviderRegistryLayerLive),
+    ),
+  ),
 );
 
 const CheckpointingLayerLive = Layer.empty.pipe(

@@ -1,5 +1,6 @@
+import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import { PositiveInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { NonNegativeInt, PositiveInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { VcsDriverKind } from "./vcs.ts";
 
 export const SourceControlProviderKind = Schema.Literals([
@@ -102,6 +103,141 @@ export const SourceControlPublishRepositoryResult = Schema.Struct({
   status: SourceControlPublishStatus,
 });
 export type SourceControlPublishRepositoryResult = typeof SourceControlPublishRepositoryResult.Type;
+
+export const SourceControlChangeRequestReviewState = Schema.Literals([
+  "approved",
+  "changes_requested",
+  "review_required",
+  "commented",
+  "unknown",
+]);
+export type SourceControlChangeRequestReviewState =
+  typeof SourceControlChangeRequestReviewState.Type;
+
+export const SourceControlCheckRollupState = Schema.Literals([
+  "success",
+  "pending",
+  "failure",
+  "neutral",
+  "skipped",
+  "unknown",
+]);
+export type SourceControlCheckRollupState = typeof SourceControlCheckRollupState.Type;
+
+export const SourceControlReviewCommentState = Schema.Literals([
+  "approved",
+  "changes_requested",
+  "commented",
+  "pending",
+  "dismissed",
+  "unknown",
+]);
+export type SourceControlReviewCommentState = typeof SourceControlReviewCommentState.Type;
+
+export const SourceControlReviewComment = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  databaseId: Schema.NullOr(NonNegativeInt),
+  authorLogin: Schema.NullOr(TrimmedNonEmptyString),
+  body: Schema.String,
+  url: Schema.String,
+  path: Schema.NullOr(TrimmedNonEmptyString),
+  diffHunk: Schema.NullOr(Schema.String),
+  line: Schema.NullOr(NonNegativeInt),
+  startLine: Schema.NullOr(NonNegativeInt),
+  createdAt: Schema.DateTimeUtc,
+  updatedAt: Schema.DateTimeUtc,
+  reviewState: SourceControlReviewCommentState,
+});
+export type SourceControlReviewComment = typeof SourceControlReviewComment.Type;
+
+export const SourceControlReviewThread = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  isResolved: Schema.Boolean,
+  isOutdated: Schema.Boolean,
+  path: Schema.NullOr(TrimmedNonEmptyString),
+  line: Schema.NullOr(NonNegativeInt),
+  startLine: Schema.NullOr(NonNegativeInt),
+  comments: Schema.Array(SourceControlReviewComment),
+});
+export type SourceControlReviewThread = typeof SourceControlReviewThread.Type;
+
+export const SourceControlCheckRunSummary = Schema.Struct({
+  name: TrimmedNonEmptyString,
+  state: SourceControlCheckRollupState,
+  description: Schema.NullOr(Schema.String),
+  detailsUrl: Schema.NullOr(Schema.String),
+  startedAt: Schema.NullOr(Schema.DateTimeUtc),
+  completedAt: Schema.NullOr(Schema.DateTimeUtc),
+  workflowName: Schema.NullOr(TrimmedNonEmptyString),
+});
+export type SourceControlCheckRunSummary = typeof SourceControlCheckRunSummary.Type;
+
+export const SourceControlChecksSummary = Schema.Struct({
+  state: SourceControlCheckRollupState,
+  totalCount: NonNegativeInt,
+  successCount: NonNegativeInt,
+  pendingCount: NonNegativeInt,
+  failureCount: NonNegativeInt,
+  skippedCount: NonNegativeInt,
+  items: Schema.Array(SourceControlCheckRunSummary).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
+});
+export type SourceControlChecksSummary = typeof SourceControlChecksSummary.Type;
+
+export const SourceControlReviewSummary = Schema.Struct({
+  approvingReviewCount: NonNegativeInt,
+  changesRequestedReviewCount: NonNegativeInt,
+  commentedReviewCount: NonNegativeInt,
+}).pipe(
+  Schema.withDecodingDefault(
+    Effect.succeed({
+      approvingReviewCount: 0,
+      changesRequestedReviewCount: 0,
+      commentedReviewCount: 0,
+    }),
+  ),
+);
+export type SourceControlReviewSummary = typeof SourceControlReviewSummary.Type;
+
+export const SourceControlChangeRequestReviewSnapshot = Schema.Struct({
+  provider: SourceControlProviderKind,
+  number: PositiveInt,
+  title: TrimmedNonEmptyString,
+  url: Schema.String,
+  reviewDecision: SourceControlChangeRequestReviewState,
+  reviewSummary: SourceControlReviewSummary,
+  checks: SourceControlChecksSummary,
+  threadCount: NonNegativeInt,
+  resolvedThreadCount: NonNegativeInt,
+  unresolvedThreadCount: NonNegativeInt,
+  commentCount: NonNegativeInt,
+  resolvedCommentCount: NonNegativeInt,
+  unresolvedCommentCount: NonNegativeInt,
+  threads: Schema.Array(SourceControlReviewThread),
+  fetchedAt: Schema.DateTimeUtc,
+  truncated: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+});
+export type SourceControlChangeRequestReviewSnapshot =
+  typeof SourceControlChangeRequestReviewSnapshot.Type;
+
+export const SourceControlChangeRequestReviewInput = Schema.Struct({
+  cwd: TrimmedNonEmptyString,
+  reference: TrimmedNonEmptyString,
+});
+export type SourceControlChangeRequestReviewInput =
+  typeof SourceControlChangeRequestReviewInput.Type;
+
+export const SourceControlChangeRequestReviewStreamEvent = Schema.Union([
+  Schema.TaggedStruct("snapshot", {
+    snapshot: SourceControlChangeRequestReviewSnapshot,
+  }),
+  Schema.TaggedStruct("updated", {
+    snapshot: SourceControlChangeRequestReviewSnapshot,
+  }),
+]);
+export type SourceControlChangeRequestReviewStreamEvent =
+  typeof SourceControlChangeRequestReviewStreamEvent.Type;
 
 export const SourceControlDiscoveryStatus = Schema.Literals(["available", "missing"]);
 export type SourceControlDiscoveryStatus = typeof SourceControlDiscoveryStatus.Type;

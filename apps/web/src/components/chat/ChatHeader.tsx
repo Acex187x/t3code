@@ -1,4 +1,5 @@
 import {
+  type SourceControlChangeRequestReviewSnapshot,
   type EnvironmentId,
   type EditorId,
   type ProjectScript,
@@ -9,7 +10,7 @@ import { scopeThreadRef } from "@t3tools/client-runtime";
 import { memo } from "react";
 import GitActionsControl from "../GitActionsControl";
 import { type DraftId } from "~/composerDraftStore";
-import { DiffIcon, TerminalSquareIcon } from "lucide-react";
+import { DiffIcon, MessageSquareTextIcon, TerminalSquareIcon } from "lucide-react";
 import { Badge } from "../ui/badge";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import ProjectScriptsControl, { type NewProjectScriptInput } from "../ProjectScriptsControl";
@@ -17,6 +18,10 @@ import { Toggle } from "../ui/toggle";
 import { SidebarTrigger } from "../ui/sidebar";
 import { OpenInPicker } from "./OpenInPicker";
 import { usePrimaryEnvironmentId } from "../../environments/primary";
+import { useGitStatus } from "../../lib/gitStatusState";
+import { useChangeRequestReviewSnapshot } from "../../lib/changeRequestReviewState";
+import { Button } from "../ui/button";
+import { Spinner } from "../ui/spinner";
 
 interface ChatHeaderProps {
   activeThreadEnvironmentId: EnvironmentId;
@@ -42,6 +47,7 @@ interface ChatHeaderProps {
   onDeleteProjectScript: (scriptId: string) => Promise<void>;
   onToggleTerminal: () => void;
   onToggleDiff: () => void;
+  onOpenReviewSidebar: () => void;
 }
 
 export function shouldShowOpenInPicker(input: {
@@ -54,6 +60,18 @@ export function shouldShowOpenInPicker(input: {
     input.primaryEnvironmentId !== null &&
     input.activeThreadEnvironmentId === input.primaryEnvironmentId
   );
+}
+
+export function resolveHeaderPullRequestReviewReference(input: {
+  readonly pullRequest:
+    | {
+        readonly number: number;
+        readonly state: string;
+      }
+    | null
+    | undefined;
+}): string | null {
+  return input.pullRequest?.state === "open" ? String(input.pullRequest.number) : null;
 }
 
 export const ChatHeader = memo(function ChatHeader({
@@ -80,6 +98,7 @@ export const ChatHeader = memo(function ChatHeader({
   onDeleteProjectScript,
   onToggleTerminal,
   onToggleDiff,
+  onOpenReviewSidebar,
 }: ChatHeaderProps) {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const showOpenInPicker = shouldShowOpenInPicker({
@@ -135,6 +154,13 @@ export const ChatHeader = memo(function ChatHeader({
             {...(draftId ? { draftId } : {})}
           />
         )}
+        {activeProjectName ? (
+          <PullRequestReviewHeaderControl
+            environmentId={activeThreadEnvironmentId}
+            cwd={gitCwd}
+            onOpenReviewSidebar={onOpenReviewSidebar}
+          />
+        ) : null}
         <Tooltip>
           <TooltipTrigger
             render={
@@ -187,3 +213,92 @@ export const ChatHeader = memo(function ChatHeader({
     </div>
   );
 });
+
+function reviewDecisionLabel(snapshot: SourceControlChangeRequestReviewSnapshot): string {
+  return snapshot.reviewDecision.replaceAll("_", " ");
+}
+
+function checksLabel(snapshot: SourceControlChangeRequestReviewSnapshot): string {
+  if (snapshot.checks.totalCount === 0) {
+    return "checks unknown";
+  }
+  return `${snapshot.checks.state} checks`;
+}
+
+function reviewSummaryLabel(snapshot: SourceControlChangeRequestReviewSnapshot): string {
+  if (snapshot.reviewSummary.changesRequestedReviewCount > 0) {
+    return `${snapshot.reviewSummary.changesRequestedReviewCount} changes requested`;
+  }
+  if (snapshot.reviewSummary.approvingReviewCount > 0) {
+    return `${snapshot.reviewSummary.approvingReviewCount} approval`;
+  }
+  return "no submitted reviews";
+}
+
+function PullRequestReviewHeaderControl({
+  environmentId,
+  cwd,
+  onOpenReviewSidebar,
+}: {
+  readonly environmentId: EnvironmentId;
+  readonly cwd: string | null;
+  readonly onOpenReviewSidebar: () => void;
+}) {
+  const { data: gitStatus = null } = useGitStatus({
+    environmentId,
+    cwd,
+  });
+  const reviewReference = resolveHeaderPullRequestReviewReference({
+    pullRequest: gitStatus?.pr,
+  });
+  const {
+    data: snapshot,
+    isLoading,
+    error,
+  } = useChangeRequestReviewSnapshot({
+    environmentId,
+    cwd,
+    reference: reviewReference,
+    enabled: reviewReference !== null,
+  });
+
+  if (reviewReference === null) {
+    return null;
+  }
+
+  const tooltip = snapshot
+    ? `#${snapshot.number}: ${snapshot.unresolvedCommentCount} unresolved, ${reviewSummaryLabel(
+        snapshot,
+      )}, ${reviewDecisionLabel(snapshot)}, ${checksLabel(snapshot)}`
+    : error
+      ? "Unable to load review comments"
+      : "Loading review comments";
+
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            type="button"
+            size="xs"
+            variant="outline"
+            className="gap-1.5 px-2 text-[10px]"
+            onClick={onOpenReviewSidebar}
+            aria-label={tooltip}
+          >
+            {isLoading && !snapshot ? (
+              <Spinner className="size-3" />
+            ) : (
+              <MessageSquareTextIcon className="size-3" />
+            )}
+            <span>{snapshot ? snapshot.unresolvedCommentCount : "..."}</span>
+            {snapshot ? (
+              <span className="hidden @4xl/header-actions:inline">unresolved</span>
+            ) : null}
+          </Button>
+        }
+      />
+      <TooltipPopup side="bottom">{tooltip}</TooltipPopup>
+    </Tooltip>
+  );
+}

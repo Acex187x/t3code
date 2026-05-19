@@ -140,6 +140,14 @@ export const make = Effect.fn("makeGitLabSourceControlProvider")(function* () {
       gitlab
         .checkoutMergeRequest(input)
         .pipe(Effect.mapError((error) => providerError("checkoutChangeRequest", error))),
+    getChangeRequestReviewSnapshot: () =>
+      Effect.fail(
+        new SourceControlProviderError({
+          provider: "gitlab",
+          operation: "getChangeRequestReviewSnapshot",
+          detail: "GitLab review comment snapshots are not supported yet.",
+        }),
+      ),
   });
 });
 

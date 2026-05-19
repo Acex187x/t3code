@@ -109,6 +109,14 @@ export const make = Effect.fn("makeBitbucketSourceControlProvider")(function* ()
           ...(input.force !== undefined ? { force: input.force } : {}),
         })
         .pipe(Effect.mapError((error) => providerError("checkoutChangeRequest", error))),
+    getChangeRequestReviewSnapshot: () =>
+      Effect.fail(
+        new SourceControlProviderError({
+          provider: "bitbucket",
+          operation: "getChangeRequestReviewSnapshot",
+          detail: "Bitbucket review comment snapshots are not supported yet.",
+        }),
+      ),
   });
 });
 

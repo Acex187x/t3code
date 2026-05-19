@@ -60,6 +60,8 @@ const rpcClientMock = {
     lookupRepository: vi.fn(),
     cloneRepository: vi.fn(),
     publishRepository: vi.fn(),
+    getChangeRequestReviewSnapshot: vi.fn(),
+    subscribeChangeRequestReviewSnapshot: vi.fn(() => () => undefined),
   },
   shell: {
     openInEditor: vi.fn(),

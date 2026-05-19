@@ -215,6 +215,156 @@ describe("GitHubCli.layer", () => {
     }).pipe(Effect.provide(layer)),
   );
 
+  it.effect("reads pull request review snapshots", () =>
+    Effect.gen(function* () {
+      mockRun
+        .mockReturnValueOnce(
+          Effect.succeed(
+            processOutput(
+              // @effect-diagnostics-next-line preferSchemaOverJson:off
+              JSON.stringify({
+                number: 42,
+                title: "Review agent work",
+                url: "https://github.com/acme/repo/pull/42",
+                reviewDecision: "CHANGES_REQUESTED",
+                reviews: [{ state: "APPROVED" }, { state: "CHANGES_REQUESTED" }],
+                statusCheckRollup: [
+                  {
+                    name: "Vercel",
+                    status: "COMPLETED",
+                    conclusion: "SUCCESS",
+                    detailsUrl: "https://vercel.com/acme/repo",
+                    completedAt: "2026-05-19T00:02:00.000Z",
+                  },
+                  {
+                    name: "GrepTile Review",
+                    status: "IN_PROGRESS",
+                    conclusion: null,
+                    detailsUrl: "https://github.com/acme/repo/actions/runs/1",
+                    startedAt: "2026-05-19T00:01:00.000Z",
+                    workflowName: "GrepTile Review",
+                  },
+                ],
+              }),
+            ),
+          ),
+        )
+        .mockReturnValueOnce(
+          // @effect-diagnostics-next-line preferSchemaOverJson:off
+          Effect.succeed(processOutput(JSON.stringify({ nameWithOwner: "acme/repo" }))),
+        )
+        .mockReturnValueOnce(
+          Effect.succeed(
+            processOutput(
+              // @effect-diagnostics-next-line preferSchemaOverJson:off
+              JSON.stringify([
+                {
+                  data: {
+                    repository: {
+                      pullRequest: {
+                        reviewThreads: {
+                          nodes: [
+                            {
+                              id: "PRRT_1",
+                              isResolved: false,
+                              isOutdated: false,
+                              path: "src/app.ts",
+                              line: 12,
+                              startLine: null,
+                              comments: {
+                                nodes: [
+                                  {
+                                    id: "PRRC_1",
+                                    databaseId: 123,
+                                    author: { login: "reviewer" },
+                                    body: "Please fix this.",
+                                    url: "https://github.com/acme/repo/pull/42#discussion_r123",
+                                    path: "src/app.ts",
+                                    diffHunk: "@@ -1 +1 @@",
+                                    line: 12,
+                                    startLine: null,
+                                    createdAt: "2026-05-19T00:00:00.000Z",
+                                    updatedAt: "2026-05-19T00:00:00.000Z",
+                                    pullRequestReview: { state: "CHANGES_REQUESTED" },
+                                  },
+                                ],
+                              },
+                            },
+                            {
+                              id: "PRRT_2",
+                              isResolved: true,
+                              isOutdated: false,
+                              path: "src/done.ts",
+                              line: 5,
+                              startLine: null,
+                              comments: {
+                                nodes: [
+                                  {
+                                    id: "PRRC_2",
+                                    databaseId: 124,
+                                    author: null,
+                                    body: "Done.",
+                                    url: "https://github.com/acme/repo/pull/42#discussion_r124",
+                                    path: "src/done.ts",
+                                    diffHunk: null,
+                                    line: 5,
+                                    startLine: null,
+                                    createdAt: "2026-05-19T00:00:00.000Z",
+                                    updatedAt: "2026-05-19T00:00:00.000Z",
+                                    pullRequestReview: { state: "COMMENTED" },
+                                  },
+                                ],
+                              },
+                            },
+                          ],
+                        },
+                      },
+                    },
+                  },
+                },
+              ]),
+            ),
+          ),
+        );
+
+      const gh = yield* GitHubCli.GitHubCli;
+      const result = yield* gh.getPullRequestReviewSnapshot({
+        cwd: "/repo",
+        reference: "42",
+      });
+
+      assert.strictEqual(result.reviewDecision, "changes_requested");
+      assert.strictEqual(result.reviewSummary.approvingReviewCount, 1);
+      assert.strictEqual(result.reviewSummary.changesRequestedReviewCount, 1);
+      assert.strictEqual(result.checks.state, "pending");
+      assert.strictEqual(result.checks.items.length, 2);
+      assert.strictEqual(result.checks.items[0]?.name, "Vercel");
+      assert.strictEqual(result.checks.items[1]?.state, "pending");
+      assert.strictEqual(result.commentCount, 2);
+      assert.strictEqual(result.unresolvedCommentCount, 1);
+      assert.strictEqual(result.resolvedCommentCount, 1);
+      assert.strictEqual(result.threads[0]?.comments[0]?.reviewState, "changes_requested");
+      expect(mockRun).toHaveBeenLastCalledWith({
+        operation: "GitHubCli.execute",
+        command: "gh",
+        args: expect.arrayContaining([
+          "api",
+          "graphql",
+          "--paginate",
+          "--slurp",
+          "-F",
+          "owner=acme",
+          "-F",
+          "name=repo",
+          "-F",
+          "number=42",
+        ]),
+        cwd: "/repo",
+        timeoutMs: 60_000,
+      });
+    }).pipe(Effect.provide(layer)),
+  );
+
   it.effect("creates repositories and parses clone URLs from create output", () =>
     Effect.gen(function* () {
       mockRun.mockReturnValueOnce(

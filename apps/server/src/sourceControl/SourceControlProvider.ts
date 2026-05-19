@@ -8,6 +8,7 @@ import type {
   SourceControlProviderKind,
   SourceControlRepositoryCloneUrls,
   SourceControlRepositoryVisibility,
+  SourceControlChangeRequestReviewSnapshot,
 } from "@t3tools/contracts";
 
 export interface SourceControlProviderContext {
@@ -94,6 +95,11 @@ export interface SourceControlProviderShape {
     readonly reference: string;
     readonly force?: boolean;
   }) => Effect.Effect<void, SourceControlProviderError>;
+  readonly getChangeRequestReviewSnapshot: (input: {
+    readonly cwd: string;
+    readonly context?: SourceControlProviderContext;
+    readonly reference: string;
+  }) => Effect.Effect<SourceControlChangeRequestReviewSnapshot, SourceControlProviderError>;
 }
 
 export class SourceControlProvider extends Context.Service<

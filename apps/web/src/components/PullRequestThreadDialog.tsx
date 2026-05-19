@@ -7,6 +7,7 @@ import {
   gitPreparePullRequestThreadMutationOptions,
   gitResolvePullRequestQueryOptions,
 } from "~/lib/gitReactQuery";
+import { useChangeRequestReviewSnapshot } from "~/lib/changeRequestReviewState";
 import { useGitStatus } from "~/lib/gitStatusState";
 import { cn } from "~/lib/utils";
 import { parsePullRequestReference } from "~/pullRequestReference";
@@ -32,6 +33,21 @@ interface PullRequestThreadDialogProps {
   initialReference: string | null;
   onOpenChange: (open: boolean) => void;
   onPrepared: (input: { branch: string; worktreePath: string | null }) => Promise<void> | void;
+  onOpenReviewSidebar: (reference: string) => void;
+}
+
+function formatReviewSummary(input: {
+  readonly approvingReviewCount: number;
+  readonly changesRequestedReviewCount: number;
+  readonly commentedReviewCount: number;
+}): string {
+  const parts: string[] = [];
+  if (input.approvingReviewCount > 0) parts.push(`${input.approvingReviewCount} approval`);
+  if (input.changesRequestedReviewCount > 0) {
+    parts.push(`${input.changesRequestedReviewCount} changes requested`);
+  }
+  if (input.commentedReviewCount > 0) parts.push(`${input.commentedReviewCount} commented`);
+  return parts.length > 0 ? parts.join(", ") : "No submitted reviews";
 }
 
 export function PullRequestThreadDialog({
@@ -42,6 +58,7 @@ export function PullRequestThreadDialog({
   initialReference,
   onOpenChange,
   onPrepared,
+  onOpenReviewSidebar,
 }: PullRequestThreadDialogProps) {
   const queryClient = useQueryClient();
   const referenceInputRef = useRef<HTMLInputElement>(null);
@@ -110,6 +127,12 @@ export function PullRequestThreadDialog({
       ? (resolvePullRequestQuery.data?.pullRequest ?? null)
       : null;
   const resolvedPullRequest = liveResolvedPullRequest ?? cachedPullRequest;
+  const reviewSnapshotState = useChangeRequestReviewSnapshot({
+    environmentId,
+    cwd,
+    reference: resolvedPullRequest ? String(resolvedPullRequest.number) : null,
+    enabled: open && gitStatus?.sourceControlProvider?.kind === "github",
+  });
   const isResolving =
     open &&
     parsedReference !== null &&
@@ -232,7 +255,7 @@ export function PullRequestThreadDialog({
           </label>
 
           {resolvedPullRequest ? (
-            <div className="rounded-xl border border-border/70 bg-muted/24 p-3">
+            <div className="rounded-lg border border-border/70 bg-muted/24 p-3">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <p className="truncate font-medium text-sm">{resolvedPullRequest.title}</p>
@@ -245,6 +268,51 @@ export function PullRequestThreadDialog({
                   {resolvedPullRequest.state}
                 </span>
               </div>
+              {gitStatus?.sourceControlProvider?.kind === "github" ? (
+                <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {reviewSnapshotState.data ? (
+                      <>
+                        <span className="rounded-md bg-background/70 px-1.5 py-0.5 text-muted-foreground">
+                          Review {reviewSnapshotState.data.reviewDecision.replaceAll("_", " ")}
+                        </span>
+                        <span className="rounded-md bg-background/70 px-1.5 py-0.5 text-muted-foreground">
+                          {formatReviewSummary(reviewSnapshotState.data.reviewSummary)}
+                        </span>
+                        <span className="rounded-md bg-background/70 px-1.5 py-0.5 text-muted-foreground">
+                          Checks {reviewSnapshotState.data.checks.state}
+                        </span>
+                        <span className="rounded-md bg-background/70 px-1.5 py-0.5 text-muted-foreground">
+                          {reviewSnapshotState.data.commentCount} comments
+                        </span>
+                        <span className="rounded-md bg-background/70 px-1.5 py-0.5 text-muted-foreground">
+                          {reviewSnapshotState.data.unresolvedCommentCount} unresolved
+                        </span>
+                        <span className="rounded-md bg-background/70 px-1.5 py-0.5 text-muted-foreground">
+                          {reviewSnapshotState.data.resolvedCommentCount} resolved
+                        </span>
+                      </>
+                    ) : reviewSnapshotState.isLoading ? (
+                      <span className="inline-flex items-center gap-1 text-muted-foreground">
+                        <Spinner className="size-3" />
+                        Loading review comments...
+                      </span>
+                    ) : reviewSnapshotState.error ? (
+                      <span className="text-muted-foreground">
+                        Review comments unavailable: {reviewSnapshotState.error.message}
+                      </span>
+                    ) : null}
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onOpenReviewSidebar(String(resolvedPullRequest.number))}
+                  >
+                    Open review sidebar
+                  </Button>
+                </div>
+              ) : null}
             </div>
           ) : null}
 

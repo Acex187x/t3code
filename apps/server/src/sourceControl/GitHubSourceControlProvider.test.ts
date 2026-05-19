@@ -157,3 +157,59 @@ it.effect("creates GitHub PRs through provider-neutral input names", () =>
     });
   }),
 );
+
+it.effect("maps GitHub review snapshots through provider-neutral API", () =>
+  Effect.gen(function* () {
+    const provider = yield* makeProvider({
+      getPullRequestReviewSnapshot: () =>
+        Effect.succeed({
+          provider: "github",
+          number: 42,
+          title: "Review agent work",
+          url: "https://github.com/pingdotgg/t3code/pull/42",
+          reviewDecision: "changes_requested",
+          reviewSummary: {
+            approvingReviewCount: 0,
+            changesRequestedReviewCount: 1,
+            commentedReviewCount: 0,
+          },
+          checks: {
+            state: "pending",
+            totalCount: 1,
+            successCount: 0,
+            pendingCount: 1,
+            failureCount: 0,
+            skippedCount: 0,
+            items: [
+              {
+                name: "GrepTile Review",
+                state: "pending",
+                description: "Started 1 minute ago",
+                detailsUrl: "https://github.com/pingdotgg/t3code/actions/runs/1",
+                startedAt: DateTime.makeUnsafe("2026-05-19T00:00:00.000Z"),
+                completedAt: null,
+                workflowName: "GrepTile Review",
+              },
+            ],
+          },
+          threadCount: 0,
+          resolvedThreadCount: 0,
+          unresolvedThreadCount: 0,
+          commentCount: 0,
+          resolvedCommentCount: 0,
+          unresolvedCommentCount: 0,
+          threads: [],
+          fetchedAt: DateTime.makeUnsafe("2026-05-19T00:00:00.000Z"),
+          truncated: false,
+        }),
+    });
+
+    const snapshot = yield* provider.getChangeRequestReviewSnapshot({
+      cwd: "/repo",
+      reference: "42",
+    });
+
+    assert.strictEqual(snapshot.provider, "github");
+    assert.strictEqual(snapshot.reviewDecision, "changes_requested");
+  }),
+);

@@ -19,6 +19,10 @@
       "types": "./src/sourceControl.ts",
       "import": "./src/sourceControl.ts"
     },
+    "./changeRequestReviewContext": {
+      "types": "./src/changeRequestReviewContext.ts",
+      "import": "./src/changeRequestReviewContext.ts"
+    },
     "./logging": {
       "types": "./src/logging.ts",
       "import": "./src/logging.ts"

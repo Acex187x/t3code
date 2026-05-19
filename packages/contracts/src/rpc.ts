@@ -90,9 +90,13 @@ import { ServerSettings, ServerSettingsError, ServerSettingsPatch } from "./sett
 import {
   SourceControlCloneRepositoryInput,
   SourceControlCloneRepositoryResult,
+  SourceControlChangeRequestReviewInput,
+  SourceControlChangeRequestReviewSnapshot,
+  SourceControlChangeRequestReviewStreamEvent,
   SourceControlDiscoveryResult,
   SourceControlPublishRepositoryInput,
   SourceControlPublishRepositoryResult,
+  SourceControlProviderError,
   SourceControlRepositoryError,
   SourceControlRepositoryInfo,
   SourceControlRepositoryLookupInput,
@@ -154,8 +158,10 @@ export const WS_METHODS = {
   sourceControlLookupRepository: "sourceControl.lookupRepository",
   sourceControlCloneRepository: "sourceControl.cloneRepository",
   sourceControlPublishRepository: "sourceControl.publishRepository",
+  sourceControlGetChangeRequestReviewSnapshot: "sourceControl.getChangeRequestReviewSnapshot",
 
   // Streaming subscriptions
+  subscribeChangeRequestReviewSnapshot: "sourceControl.subscribeChangeRequestReviewSnapshot",
   subscribeVcsStatus: "subscribeVcsStatus",
   subscribeTerminalEvents: "subscribeTerminalEvents",
   subscribeServerConfig: "subscribeServerConfig",
@@ -264,6 +270,15 @@ export const WsSourceControlPublishRepositoryRpc = Rpc.make(
   },
 );
 
+export const WsSourceControlGetChangeRequestReviewSnapshotRpc = Rpc.make(
+  WS_METHODS.sourceControlGetChangeRequestReviewSnapshot,
+  {
+    payload: SourceControlChangeRequestReviewInput,
+    success: SourceControlChangeRequestReviewSnapshot,
+    error: SourceControlProviderError,
+  },
+);
+
 export const WsProjectsSearchEntriesRpc = Rpc.make(WS_METHODS.projectsSearchEntries, {
   payload: ProjectSearchEntriesInput,
   success: ProjectSearchEntriesResult,
@@ -293,6 +308,16 @@ export const WsSubscribeVcsStatusRpc = Rpc.make(WS_METHODS.subscribeVcsStatus, {
   error: GitManagerServiceError,
   stream: true,
 });
+
+export const WsSubscribeChangeRequestReviewSnapshotRpc = Rpc.make(
+  WS_METHODS.subscribeChangeRequestReviewSnapshot,
+  {
+    payload: SourceControlChangeRequestReviewInput,
+    success: SourceControlChangeRequestReviewStreamEvent,
+    error: SourceControlProviderError,
+    stream: true,
+  },
+);
 
 export const WsVcsPullRpc = Rpc.make(WS_METHODS.vcsPull, {
   payload: VcsPullInput,
@@ -488,11 +513,13 @@ export const WsRpcGroup = RpcGroup.make(
   WsSourceControlLookupRepositoryRpc,
   WsSourceControlCloneRepositoryRpc,
   WsSourceControlPublishRepositoryRpc,
+  WsSourceControlGetChangeRequestReviewSnapshotRpc,
   WsProjectsSearchEntriesRpc,
   WsProjectsWriteFileRpc,
   WsShellOpenInEditorRpc,
   WsFilesystemBrowseRpc,
   WsSubscribeVcsStatusRpc,
+  WsSubscribeChangeRequestReviewSnapshotRpc,
   WsVcsPullRpc,
   WsVcsRefreshStatusRpc,
   WsGitRunStackedActionRpc,

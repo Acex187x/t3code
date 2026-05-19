@@ -1,7 +1,7 @@
 import { EnvironmentId } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
-import { shouldShowOpenInPicker } from "./ChatHeader";
+import { resolveHeaderPullRequestReviewReference, shouldShowOpenInPicker } from "./ChatHeader";
 
 describe("shouldShowOpenInPicker", () => {
   const primaryEnvironmentId = EnvironmentId.make("environment-primary");
@@ -44,5 +44,27 @@ describe("shouldShowOpenInPicker", () => {
         primaryEnvironmentId,
       }),
     ).toBe(false);
+  });
+});
+
+describe("resolveHeaderPullRequestReviewReference", () => {
+  it("uses the current open PR as the review sidebar reference", () => {
+    expect(
+      resolveHeaderPullRequestReviewReference({
+        pullRequest: { number: 69, state: "open" },
+      }),
+    ).toBe("69");
+  });
+
+  it("does not require a matching thread branch or provider discovery", () => {
+    expect(
+      resolveHeaderPullRequestReviewReference({
+        pullRequest: { number: 69, state: "closed" },
+      }),
+    ).toBe(null);
+  });
+
+  it("hides the review entry when git status has no PR", () => {
+    expect(resolveHeaderPullRequestReviewReference({ pullRequest: null })).toBe(null);
   });
 });

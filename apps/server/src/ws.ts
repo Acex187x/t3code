@@ -70,6 +70,7 @@ import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import * as SourceControlDiscoveryLayer from "./sourceControl/SourceControlDiscovery.ts";
 import { SourceControlRepositoryService } from "./sourceControl/SourceControlRepositoryService.ts";
+import { ChangeRequestReviewBroadcaster } from "./sourceControl/ChangeRequestReviewBroadcaster.ts";
 import * as AzureDevOpsCli from "./sourceControl/AzureDevOpsCli.ts";
 import * as BitbucketApi from "./sourceControl/BitbucketApi.ts";
 import * as GitHubCli from "./sourceControl/GitHubCli.ts";
@@ -182,6 +183,7 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
       const serverEnvironment = yield* ServerEnvironment;
       const serverAuth = yield* ServerAuth;
       const sourceControlDiscovery = yield* SourceControlDiscoveryLayer.SourceControlDiscovery;
+      const changeRequestReviews = yield* ChangeRequestReviewBroadcaster;
       const automaticGitFetchInterval = serverSettings.getSettings.pipe(
         Effect.map((settings) => settings.automaticGitFetchInterval),
         Effect.catch((cause) =>
@@ -949,6 +951,14 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
               "rpc.aggregate": "source-control",
             },
           ),
+        [WS_METHODS.sourceControlGetChangeRequestReviewSnapshot]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.sourceControlGetChangeRequestReviewSnapshot,
+            changeRequestReviews.getSnapshot(input),
+            {
+              "rpc.aggregate": "source-control",
+            },
+          ),
         [WS_METHODS.projectsSearchEntries]: (input) =>
           observeRpcEffect(
             WS_METHODS.projectsSearchEntries,
@@ -1005,6 +1015,14 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
             }),
             {
               "rpc.aggregate": "vcs",
+            },
+          ),
+        [WS_METHODS.subscribeChangeRequestReviewSnapshot]: (input) =>
+          observeRpcStream(
+            WS_METHODS.subscribeChangeRequestReviewSnapshot,
+            changeRequestReviews.streamSnapshot(input),
+            {
+              "rpc.aggregate": "source-control",
             },
           ),
         [WS_METHODS.vcsRefreshStatus]: (input) =>

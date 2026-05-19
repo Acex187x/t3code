@@ -8,6 +8,7 @@
  */
 import {
   type CanUseTool,
+  createSdkMcpServer,
   query,
   type Options as ClaudeQueryOptions,
   type PermissionMode,
@@ -18,6 +19,7 @@ import {
   type SettingSource,
   type SDKUserMessage,
   type ModelUsage,
+  tool,
 } from "@anthropic-ai/claude-agent-sdk";
 import { parseCliArgs } from "@t3tools/shared/cliArgs";
 import {
@@ -64,9 +66,12 @@ import * as Random from "effect/Random";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
+import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import { z } from "zod";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
+import { PULL_REQUEST_REVIEW_DEVELOPER_INSTRUCTIONS } from "../CodexDeveloperInstructions.ts";
 import { makeClaudeEnvironment } from "../Drivers/ClaudeHome.ts";
 import {
   getClaudeModelCapabilities,
@@ -94,6 +99,17 @@ type ClaudeToolResultStreamKind = Extract<
   "command_output" | "file_change_output"
 >;
 type ClaudeSdkEffort = NonNullable<ClaudeQueryOptions["effort"]>;
+
+class ClaudeReviewCommentReplyError extends Schema.TaggedErrorClass<ClaudeReviewCommentReplyError>()(
+  "ClaudeReviewCommentReplyError",
+  {
+    detail: Schema.String,
+  },
+) {
+  override get message(): string {
+    return this.detail;
+  }
+}
 
 function encodeJsonStringForDiagnostics(input: unknown): string | undefined {
   const result = encodeUnknownJsonStringExit(input);
@@ -227,6 +243,86 @@ function toMessage(cause: unknown, fallback: string): string {
   }
   return fallback;
 }
+
+const collectStreamAsString = <E>(stream: Stream.Stream<Uint8Array, E>): Effect.Effect<string, E> =>
+  stream.pipe(
+    Stream.decodeText(),
+    Stream.runFold(
+      () => "",
+      (acc, chunk) => acc + chunk,
+    ),
+  );
+
+const replyToPullRequestReviewThread = Effect.fn("replyToPullRequestReviewThread")(
+  function* (input: {
+    readonly cwd: string;
+    readonly env: NodeJS.ProcessEnv;
+    readonly reviewThreadId: string;
+    readonly body: string;
+  }) {
+    const query = `
+mutation($pullRequestReviewThreadId: ID!, $body: String!) {
+  addPullRequestReviewThreadReply(input: { pullRequestReviewThreadId: $pullRequestReviewThreadId, body: $body }) {
+    comment {
+      id
+      url
+    }
+  }
+}
+`;
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    const child = yield* spawner.spawn(
+      ChildProcess.make(
+        "gh",
+        [
+          "api",
+          "graphql",
+          "-f",
+          `query=${query}`,
+          "-F",
+          `pullRequestReviewThreadId=${input.reviewThreadId}`,
+          "-f",
+          `body=${input.body}`,
+        ],
+        {
+          cwd: input.cwd,
+          env: input.env,
+        },
+      ),
+    );
+    const [stdout, stderr, exitCode] = yield* Effect.all(
+      [
+        collectStreamAsString(child.stdout),
+        collectStreamAsString(child.stderr),
+        child.exitCode.pipe(Effect.map(Number)),
+      ],
+      { concurrency: "unbounded" },
+    );
+
+    if (exitCode !== 0) {
+      return yield* new ClaudeReviewCommentReplyError({
+        detail: stderr.trim() || `gh api graphql exited with code ${exitCode}`,
+      });
+    }
+
+    const parsedResult = decodeUnknownJsonStringExit(stdout);
+    if (!Exit.isSuccess(parsedResult)) {
+      return undefined;
+    }
+
+    const parsed = parsedResult.value as {
+      readonly data?: {
+        readonly addPullRequestReviewThreadReply?: {
+          readonly comment?: {
+            readonly url?: unknown;
+          };
+        };
+      };
+    };
+    const url = parsed.data?.addPullRequestReviewThreadReply?.comment?.url;
+    return typeof url === "string" && url.length > 0 ? url : undefined;
+  },
+);
 
 function toProcessError(
   cause: unknown,
@@ -591,6 +687,14 @@ const CLAUDE_SETTING_SOURCES = [
   "project",
   "local",
 ] as const satisfies ReadonlyArray<SettingSource>;
+
+const REVIEW_COMMENT_WORKFLOW_STATUSES = [
+  "in_progress",
+  "ready_to_push",
+  "in_review",
+  "unresolved",
+  "resolved",
+] as const;
 
 function buildPromptText(
   input: ProviderSendTurnInput,
@@ -997,6 +1101,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
   const boundInstanceId = options?.instanceId ?? ProviderInstanceId.make("claudeAgent");
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
+  const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const serverConfig = yield* ServerConfig;
   const claudeEnvironment = yield* makeClaudeEnvironment(claudeSettings, options?.environment).pipe(
     Effect.provideService(Path.Path, path),
@@ -2866,6 +2971,225 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       const canUseTool: CanUseTool = (toolName, toolInput, callbackOptions) =>
         runPromise(canUseToolEffect(toolName, toolInput, callbackOptions));
 
+      const reviewStatusMcpServer = createSdkMcpServer({
+        name: "t3-pr-review",
+        version: "0.1.0",
+        tools: [
+          tool(
+            "set_review_comment_status",
+            [
+              "Update T3 Code's visible workflow status for a pull request review thread/comment.",
+              "Use this whenever you start, finish local changes, push/hand off for review, or verify resolved/unresolved state.",
+              "This only updates local T3 Code UI state; it does not resolve or mutate GitHub review threads.",
+            ].join(" "),
+            {
+              reviewThreadId: z
+                .string()
+                .min(1)
+                .describe("The GitHub PullRequestReviewThread id shown in the review context."),
+              commentId: z
+                .string()
+                .min(1)
+                .optional()
+                .describe(
+                  "Optional specific review comment id if the status applies to one comment.",
+                ),
+              status: z
+                .enum(REVIEW_COMMENT_WORKFLOW_STATUSES)
+                .describe(
+                  "Workflow status: in_progress, ready_to_push, in_review, unresolved, or resolved.",
+                ),
+              note: z
+                .string()
+                .max(500)
+                .optional()
+                .describe("Short human-readable note about the current work."),
+            },
+            async (args) => {
+              const context = await runPromise(Ref.get(contextRef));
+              if (!context) {
+                return {
+                  isError: true,
+                  content: [
+                    {
+                      type: "text",
+                      text: "Claude session context is unavailable; status was not updated.",
+                    },
+                  ],
+                };
+              }
+
+              const stamp = await runPromise(makeEventStamp());
+              await runPromise(
+                offerRuntimeEvent({
+                  type: "item.updated",
+                  eventId: stamp.eventId,
+                  provider: PROVIDER,
+                  providerInstanceId: boundInstanceId,
+                  createdAt: stamp.createdAt,
+                  threadId: context.session.threadId,
+                  ...(context.turnState
+                    ? { turnId: asCanonicalTurnId(context.turnState.turnId) }
+                    : {}),
+                  payload: {
+                    itemType: "mcp_tool_call",
+                    status: "completed",
+                    title: "Review comment status",
+                    detail: `${args.reviewThreadId}: ${args.status}`,
+                    data: {
+                      toolName: "set_review_comment_status",
+                      input: args,
+                    },
+                  },
+                  providerRefs: nativeProviderRefs(context),
+                  raw: {
+                    source: "claude.sdk.permission",
+                    method: "mcp/set_review_comment_status",
+                    payload: args,
+                  },
+                }),
+              );
+
+              return {
+                content: [
+                  {
+                    type: "text",
+                    text: `Updated review thread ${args.reviewThreadId} to ${args.status}.`,
+                  },
+                ],
+              };
+            },
+            {
+              alwaysLoad: true,
+            },
+          ),
+          tool(
+            "reply_to_review_comment",
+            [
+              "Post a reply to a GitHub pull request review thread describing completed work or a blocker.",
+              "Use this instead of resolving comments. This tool never resolves, closes, hides, or marks a review thread resolved.",
+            ].join(" "),
+            {
+              reviewThreadId: z
+                .string()
+                .min(1)
+                .describe("The GitHub PullRequestReviewThread id from the review context."),
+              body: z
+                .string()
+                .min(1)
+                .max(6000)
+                .describe(
+                  "Concise Markdown reply to post to the review thread. State what changed and any caveat.",
+                ),
+            },
+            async (args) => {
+              const context = await runPromise(Ref.get(contextRef));
+              if (!context) {
+                return {
+                  isError: true,
+                  content: [
+                    {
+                      type: "text",
+                      text: "Claude session context is unavailable; review comment reply was not posted.",
+                    },
+                  ],
+                };
+              }
+
+              const cwd = context.session.cwd;
+              if (!cwd) {
+                return {
+                  isError: true,
+                  content: [
+                    {
+                      type: "text",
+                      text: "No working directory is available; review comment reply was not posted.",
+                    },
+                  ],
+                };
+              }
+
+              try {
+                const url = await runPromise(
+                  Effect.scoped(
+                    replyToPullRequestReviewThread({
+                      cwd,
+                      env: claudeEnvironment,
+                      reviewThreadId: args.reviewThreadId,
+                      body: args.body,
+                    }).pipe(
+                      Effect.provideService(
+                        ChildProcessSpawner.ChildProcessSpawner,
+                        childProcessSpawner,
+                      ),
+                    ),
+                  ),
+                );
+
+                const stamp = await runPromise(makeEventStamp());
+                await runPromise(
+                  offerRuntimeEvent({
+                    type: "item.updated",
+                    eventId: stamp.eventId,
+                    provider: PROVIDER,
+                    providerInstanceId: boundInstanceId,
+                    createdAt: stamp.createdAt,
+                    threadId: context.session.threadId,
+                    ...(context.turnState
+                      ? { turnId: asCanonicalTurnId(context.turnState.turnId) }
+                      : {}),
+                    payload: {
+                      itemType: "mcp_tool_call",
+                      status: "completed",
+                      title: "Review comment reply",
+                      detail: url ?? args.reviewThreadId,
+                      data: {
+                        toolName: "reply_to_review_comment",
+                        input: args,
+                        ...(url ? { url } : {}),
+                      },
+                    },
+                    providerRefs: nativeProviderRefs(context),
+                    raw: {
+                      source: "claude.sdk.permission",
+                      method: "mcp/reply_to_review_comment",
+                      payload: {
+                        ...args,
+                        ...(url ? { url } : {}),
+                      },
+                    },
+                  }),
+                );
+
+                return {
+                  content: [
+                    {
+                      type: "text",
+                      text: url
+                        ? `Posted review comment reply: ${url}`
+                        : `Posted review comment reply to thread ${args.reviewThreadId}.`,
+                    },
+                  ],
+                };
+              } catch (cause) {
+                return {
+                  isError: true,
+                  content: [
+                    {
+                      type: "text",
+                      text: `Failed to post review comment reply: ${toMessage(cause, "Unknown error")}`,
+                    },
+                  ],
+                };
+              }
+            },
+            {
+              alwaysLoad: true,
+            },
+          ),
+        ],
+      });
+
       const claudeBinaryPath = claudeSettings.binaryPath;
       const extraArgs = parseCliArgs(claudeSettings.launchArgs).flags;
       const modelSelection =
@@ -2901,7 +3225,11 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(input.cwd ? { cwd: input.cwd } : {}),
         ...(apiModelId ? { model: apiModelId } : {}),
         pathToClaudeCodeExecutable: claudeBinaryPath,
-        systemPrompt: { type: "preset", preset: "claude_code" },
+        systemPrompt: {
+          type: "preset",
+          preset: "claude_code",
+          append: PULL_REQUEST_REVIEW_DEVELOPER_INSTRUCTIONS,
+        },
         settingSources: [...CLAUDE_SETTING_SOURCES],
         // The SDK type lags the CLI here: Opus 4.7 accepts `xhigh` even though
         // the published `Options["effort"]` union currently stops at `max`.
@@ -2919,6 +3247,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(newSessionId ? { sessionId: newSessionId } : {}),
         includePartialMessages: true,
         canUseTool,
+        mcpServers: {
+          "t3-pr-review": reviewStatusMcpServer,
+        },
         env: claudeEnvironment,
         ...(input.cwd ? { additionalDirectories: [input.cwd] } : {}),
         ...(Object.keys(extraArgs).length > 0 ? { extraArgs } : {}),

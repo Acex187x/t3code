@@ -18,6 +18,7 @@ import React, {
 import type { Components } from "react-markdown";
 import ReactMarkdown from "react-markdown";
 import { defaultUrlTransform } from "react-markdown";
+import rehypeRaw from "rehype-raw";
 import remarkGfm from "remark-gfm";
 import { VscodeEntryIcon } from "./chat/VscodeEntryIcon";
 import { renderSkillInlineMarkdownChildren } from "./chat/SkillInlineText";
@@ -62,6 +63,7 @@ interface ChatMarkdownProps {
   cwd: string | undefined;
   isStreaming?: boolean;
   skills?: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
+  allowRawHtml?: boolean;
 }
 
 const EMPTY_MARKDOWN_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">> = [];
@@ -517,6 +519,7 @@ function ChatMarkdown({
   cwd,
   isStreaming = false,
   skills = EMPTY_MARKDOWN_SKILLS,
+  allowRawHtml = false,
 }: ChatMarkdownProps) {
   const { resolvedTheme } = useTheme();
   const diffThemeName = resolveDiffThemeName(resolvedTheme);
@@ -549,6 +552,30 @@ function ChatMarkdown({
       },
       li({ node: _node, children, ...props }) {
         return <li {...props}>{renderSkillInlineMarkdownChildren(children, skills)}</li>;
+      },
+      img({ node: _node, alt, ...props }) {
+        return (
+          <img
+            {...props}
+            alt={alt ?? ""}
+            className="inline-block max-w-full align-text-bottom"
+            loading="lazy"
+          />
+        );
+      },
+      details({ node: _node, children, ...props }) {
+        return (
+          <details {...props} className="my-2 rounded-md border border-border/70 px-3 py-2">
+            {children}
+          </details>
+        );
+      },
+      summary({ node: _node, children, ...props }) {
+        return (
+          <summary {...props} className="cursor-pointer font-medium">
+            {children}
+          </summary>
+        );
       },
       a({ node: _node, href, ...props }) {
         const normalizedHref = href ? normalizeMarkdownLinkHrefKey(href) : "";
@@ -616,6 +643,7 @@ function ChatMarkdown({
     <div className="chat-markdown w-full min-w-0 text-sm leading-relaxed text-foreground/80">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
+        rehypePlugins={allowRawHtml ? [[rehypeRaw, { tagfilter: true }]] : undefined}
         components={markdownComponents}
         urlTransform={markdownUrlTransform}
       >
