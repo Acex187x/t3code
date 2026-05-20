@@ -9,6 +9,7 @@ import * as SchemaIssue from "effect/SchemaIssue";
 import {
   TrimmedNonEmptyString,
   type SourceControlChangeRequestReviewSnapshot,
+  type SourceControlCheckRollupState,
   type SourceControlRepositoryVisibility,
   type VcsError,
 } from "@t3tools/contracts";
@@ -38,6 +39,7 @@ export interface GitHubPullRequestSummary {
   readonly isCrossRepository?: boolean;
   readonly headRepositoryNameWithOwner?: string | null;
   readonly headRepositoryOwnerLogin?: string | null;
+  readonly checkRollupState?: SourceControlCheckRollupState;
 }
 
 export interface GitHubRepositoryCloneUrls {
@@ -266,7 +268,7 @@ export const make = Effect.fn("makeGitHubCli")(function* () {
           "--limit",
           String(input.limit ?? 1),
           "--json",
-          "number,title,url,baseRefName,headRefName,state,mergedAt,isCrossRepository,headRepository,headRepositoryOwner",
+          "number,title,url,baseRefName,headRefName,state,mergedAt,isCrossRepository,headRepository,headRepositoryOwner,statusCheckRollup",
         ],
       }).pipe(
         Effect.map((result) => result.stdout.trim()),
@@ -300,7 +302,7 @@ export const make = Effect.fn("makeGitHubCli")(function* () {
           "view",
           input.reference,
           "--json",
-          "number,title,url,baseRefName,headRefName,state,mergedAt,isCrossRepository,headRepository,headRepositoryOwner",
+          "number,title,url,baseRefName,headRefName,state,mergedAt,isCrossRepository,headRepository,headRepositoryOwner,statusCheckRollup",
         ],
       }).pipe(
         Effect.map((result) => result.stdout.trim()),

@@ -86,6 +86,7 @@ interface GitActionsControlProps {
   gitCwd: string | null;
   activeThreadRef: ScopedThreadRef | null;
   draftId?: DraftId;
+  onPushSucceeded?: () => void;
 }
 
 interface PendingDefaultBranchAction {
@@ -949,6 +950,7 @@ export default function GitActionsControl({
   gitCwd,
   activeThreadRef,
   draftId,
+  onPushSucceeded,
 }: GitActionsControlProps) {
   const activeEnvironmentId = activeThreadRef?.environmentId ?? null;
   const threadToastData = useMemo(
@@ -1389,6 +1391,9 @@ export default function GitActionsControl({
         const result = await promise;
         activeGitActionProgressRef.current = null;
         syncThreadBranchAfterGitAction(result);
+        if (result.push.status === "pushed") {
+          onPushSucceeded?.();
+        }
         const closeResultToast = () => {
           toastManager.close(resolvedProgressToastId);
         };

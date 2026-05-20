@@ -1,11 +1,9 @@
 import type { EnvironmentId, OrchestrationThreadActivity } from "@t3tools/contracts";
-import { MessageSquareTextIcon, PanelRightCloseIcon } from "lucide-react";
+import { ExternalLinkIcon, MessageSquareTextIcon, PanelRightCloseIcon } from "lucide-react";
 import { useMemo } from "react";
 
 import { useChangeRequestReviewSnapshot } from "~/lib/changeRequestReviewState";
-import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
-import { ScrollArea } from "./ui/scroll-area";
 import { Spinner } from "./ui/spinner";
 import {
   buildReviewCommentWorkflowStatuses,
@@ -20,12 +18,49 @@ interface PullRequestReviewSidebarProps {
   readonly markdownCwd?: string | undefined;
   readonly mode?: "sheet" | "sidebar";
   readonly activities?: ReadonlyArray<OrchestrationThreadActivity> | undefined;
+  readonly readyToPushResetAt?: string | null | undefined;
+  readonly turnInProgress?: boolean | undefined;
   readonly onClose: () => void;
-  readonly onSendReviewContext: (markdown: string) => Promise<void> | void;
+  readonly onSendReviewContext: (
+    markdown: string,
+    queuedThreadIds: ReadonlySet<string>,
+  ) => Promise<void> | void;
 }
 
-function decisionLabel(value: string): string {
-  return value.replaceAll("_", " ");
+type ReviewDecision =
+  | "approved"
+  | "changes_requested"
+  | "review_required"
+  | "commented"
+  | "unknown";
+
+function decisionLabel(value: ReviewDecision): string {
+  switch (value) {
+    case "approved":
+      return "Approved";
+    case "changes_requested":
+      return "Changes requested";
+    case "review_required":
+      return "Review required";
+    case "commented":
+      return "Commented";
+    case "unknown":
+      return "Unknown";
+  }
+}
+
+function decisionClassName(value: ReviewDecision): string {
+  switch (value) {
+    case "approved":
+      return "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-300";
+    case "changes_requested":
+      return "border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-300";
+    case "commented":
+      return "border-sky-500/30 bg-sky-500/10 text-sky-600 dark:text-sky-300";
+    case "review_required":
+    case "unknown":
+      return "border-border/60 bg-muted/30 text-muted-foreground";
+  }
 }
 
 function reviewSummaryText(snapshot: {
@@ -34,18 +69,51 @@ function reviewSummaryText(snapshot: {
     readonly changesRequestedReviewCount: number;
     readonly commentedReviewCount: number;
   };
-}): string {
+}): string | null {
   const parts: string[] = [];
   if (snapshot.reviewSummary.approvingReviewCount > 0) {
     parts.push(`${snapshot.reviewSummary.approvingReviewCount} approval`);
   }
   if (snapshot.reviewSummary.changesRequestedReviewCount > 0) {
-    parts.push(`${snapshot.reviewSummary.changesRequestedReviewCount} changes requested`);
+    parts.push(`${snapshot.reviewSummary.changesRequestedReviewCount} requested changes`);
   }
   if (snapshot.reviewSummary.commentedReviewCount > 0) {
     parts.push(`${snapshot.reviewSummary.commentedReviewCount} commented`);
   }
-  return parts.length > 0 ? parts.join(", ") : "No submitted reviews";
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
+function HeaderActions({
+  url,
+  onClose,
+}: {
+  readonly url?: string | undefined;
+  readonly onClose: () => void;
+}) {
+  return (
+    <div className="-mt-0.5 -mr-1 flex shrink-0 items-center gap-0.5">
+      {url ? (
+        <Button
+          size="icon-xs"
+          variant="ghost"
+          aria-label="Open on GitHub"
+          className="text-muted-foreground/50 hover:text-foreground/70"
+          render={<a href={url} target="_blank" rel="noreferrer" />}
+        >
+          <ExternalLinkIcon className="size-3.5" />
+        </Button>
+      ) : null}
+      <Button
+        size="icon-xs"
+        variant="ghost"
+        onClick={onClose}
+        aria-label="Close review sidebar"
+        className="text-muted-foreground/50 hover:text-foreground/70"
+      >
+        <PanelRightCloseIcon className="size-3.5" />
+      </Button>
+    </div>
+  );
 }
 
 export function PullRequestReviewSidebar({
@@ -55,6 +123,8 @@ export function PullRequestReviewSidebar({
   markdownCwd,
   mode = "sidebar",
   activities = [],
+  readyToPushResetAt = null,
+  turnInProgress = false,
   onClose,
   onSendReviewContext,
 }: PullRequestReviewSidebarProps) {
@@ -66,9 +136,14 @@ export function PullRequestReviewSidebar({
   });
   const snapshot = reviewSnapshotState.data;
   const workflowStatuses = useMemo(
-    () => buildReviewCommentWorkflowStatuses(activities),
-    [activities],
+    () =>
+      buildReviewCommentWorkflowStatuses(activities, {
+        readyToPushResetAt,
+        turnInProgress,
+      }),
+    [activities, readyToPushResetAt, turnInProgress],
   );
+  const reviewersSummary = snapshot ? reviewSummaryText(snapshot) : null;
 
   return (
     <div
@@ -79,91 +154,60 @@ export function PullRequestReviewSidebar({
           : "h-full w-full",
       )}
     >
-      <div className="flex h-12 shrink-0 items-center justify-between border-b border-border/60 px-3">
-        <div className="flex min-w-0 items-center gap-2">
-          <Badge
-            variant="secondary"
-            className="rounded-md bg-amber-500/10 px-1.5 py-0 text-[10px] font-semibold tracking-wide text-amber-500 uppercase"
-          >
-            Review
-          </Badge>
-          {snapshot ? (
-            <span className="truncate text-muted-foreground text-xs">#{snapshot.number}</span>
-          ) : null}
-        </div>
-        <Button
-          size="icon-xs"
-          variant="ghost"
-          onClick={onClose}
-          aria-label="Close review sidebar"
-          className="text-muted-foreground/50 hover:text-foreground/70"
-        >
-          <PanelRightCloseIcon className="size-3.5" />
-        </Button>
-      </div>
-
-      <ScrollArea className="min-h-0 flex-1">
-        <div className="space-y-3 p-3">
-          {snapshot ? (
-            <>
-              <div className="space-y-2">
-                <div className="min-w-0">
-                  <div className="truncate font-medium text-sm">{snapshot.title}</div>
-                  <a
-                    href={snapshot.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="truncate text-muted-foreground text-xs hover:text-foreground"
-                  >
-                    {snapshot.url}
-                  </a>
-                </div>
-                <div className="flex flex-wrap gap-1.5 text-[11px]">
-                  <span className="rounded-md bg-background/70 px-1.5 py-0.5 text-muted-foreground">
-                    {decisionLabel(snapshot.reviewDecision)}
-                  </span>
-                  <span className="rounded-md bg-background/70 px-1.5 py-0.5 text-muted-foreground">
-                    {reviewSummaryText(snapshot)}
-                  </span>
-                  <span className="rounded-md bg-background/70 px-1.5 py-0.5 text-muted-foreground">
-                    {snapshot.checks.state} checks
-                  </span>
-                  <span className="rounded-md bg-background/70 px-1.5 py-0.5 text-muted-foreground">
-                    {snapshot.unresolvedCommentCount} unresolved
-                  </span>
-                  <span className="rounded-md bg-background/70 px-1.5 py-0.5 text-muted-foreground">
-                    {snapshot.resolvedCommentCount} resolved
-                  </span>
-                </div>
+      {snapshot ? (
+        <>
+          <div className="shrink-0 border-b border-border/60 px-3 pt-3 pb-3">
+            <div className="flex items-start justify-between gap-2">
+              <h2 className="min-w-0 flex-1 font-medium text-sm leading-snug">{snapshot.title}</h2>
+              <HeaderActions url={snapshot.url} onClose={onClose} />
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span
+                className={cn(
+                  "inline-flex shrink-0 items-center rounded-md border px-1.5 py-0.5 font-medium text-[10px] transition-colors duration-200",
+                  decisionClassName(snapshot.reviewDecision),
+                )}
+              >
+                {decisionLabel(snapshot.reviewDecision)}
+              </span>
+              {reviewersSummary ? (
+                <span className="text-[11px] text-muted-foreground/70">{reviewersSummary}</span>
+              ) : null}
+            </div>
+          </div>
+          <PullRequestReviewContextPanel
+            snapshot={snapshot}
+            markdownCwd={markdownCwd}
+            mode="sidebar"
+            workflowStatuses={workflowStatuses}
+            onSendContext={onSendReviewContext}
+          />
+        </>
+      ) : (
+        <div className="flex items-start justify-between gap-2 border-b border-border/60 p-3">
+          <div className="min-w-0 flex-1">
+            {reviewSnapshotState.isLoading ? (
+              <div className="flex items-center gap-2 text-muted-foreground text-sm">
+                <Spinner className="size-4" />
+                Loading pull request review…
               </div>
-              <PullRequestReviewContextPanel
-                snapshot={snapshot}
-                markdownCwd={markdownCwd}
-                mode="sidebar"
-                workflowStatuses={workflowStatuses}
-                onSendContext={onSendReviewContext}
-              />
-            </>
-          ) : reviewSnapshotState.isLoading ? (
-            <div className="flex items-center gap-2 text-muted-foreground text-sm">
-              <Spinner className="size-4" />
-              Loading pull request review...
-            </div>
-          ) : reviewSnapshotState.error ? (
-            <div className="rounded-lg border border-border/70 bg-muted/16 p-3 text-sm">
-              <div className="mb-1 flex items-center gap-2 font-medium">
-                <MessageSquareTextIcon className="size-4" />
-                Review unavailable
+            ) : reviewSnapshotState.error ? (
+              <div>
+                <div className="mb-1 flex items-center gap-2 font-medium text-sm">
+                  <MessageSquareTextIcon className="size-4" />
+                  Review unavailable
+                </div>
+                <p className="text-muted-foreground text-xs">{reviewSnapshotState.error.message}</p>
               </div>
-              <p className="text-muted-foreground text-xs">{reviewSnapshotState.error.message}</p>
-            </div>
-          ) : (
-            <div className="rounded-lg border border-border/70 bg-muted/16 p-3 text-muted-foreground text-sm">
-              No active GitHub pull request review is available for this thread.
-            </div>
-          )}
+            ) : (
+              <p className="text-muted-foreground text-sm">
+                No active GitHub pull request review is available for this thread.
+              </p>
+            )}
+          </div>
+          <HeaderActions onClose={onClose} />
         </div>
-      </ScrollArea>
+      )}
     </div>
   );
 }

@@ -24,6 +24,7 @@ import {
   GitRunStackedActionInput,
   GitRunStackedActionResult,
   GitStackedAction,
+  type SourceControlCheckRollupState,
   VcsStatusInput,
   type VcsStatusLocalResult,
   type VcsStatusRemoteResult,
@@ -115,6 +116,7 @@ interface OpenPrInfo {
 interface PullRequestInfo extends OpenPrInfo, PullRequestHeadRemoteInfo {
   state: "open" | "closed" | "merged";
   updatedAt: Option.Option<DateTime.Utc>;
+  checkRollupState?: SourceControlCheckRollupState;
 }
 
 const pullRequestUpdatedAtDescOrder: Order.Order<PullRequestInfo> = Order.mapInput(
@@ -318,6 +320,9 @@ function toPullRequestInfo(summary: ChangeRequest): PullRequestInfo {
     ...(summary.headRepositoryOwnerLogin !== undefined
       ? { headRepositoryOwnerLogin: summary.headRepositoryOwnerLogin }
       : {}),
+    ...(summary.checkRollupState !== undefined
+      ? { checkRollupState: summary.checkRollupState }
+      : {}),
   };
 }
 
@@ -470,6 +475,7 @@ function toStatusPr(pr: PullRequestInfo): {
   baseRef: string;
   headRef: string;
   state: "open" | "closed" | "merged";
+  checkRollupState?: SourceControlCheckRollupState;
 } {
   return {
     number: pr.number,
@@ -478,6 +484,7 @@ function toStatusPr(pr: PullRequestInfo): {
     baseRef: pr.baseRefName,
     headRef: pr.headRefName,
     state: pr.state,
+    ...(pr.checkRollupState !== undefined ? { checkRollupState: pr.checkRollupState } : {}),
   };
 }
 

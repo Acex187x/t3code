@@ -28,6 +28,7 @@ export interface NormalizedGitHubPullRequestRecord {
   readonly isCrossRepository?: boolean;
   readonly headRepositoryNameWithOwner?: string | null;
   readonly headRepositoryOwnerLogin?: string | null;
+  readonly checkRollupState?: SourceControlCheckRollupState;
 }
 
 const GitHubPullRequestSchema = Schema.Struct({
@@ -54,6 +55,7 @@ const GitHubPullRequestSchema = Schema.Struct({
       }),
     ),
   ),
+  statusCheckRollup: Schema.optional(Schema.Unknown),
 });
 
 function trimOptionalString(value: string | null | undefined): string | null {
@@ -87,6 +89,10 @@ function normalizeGitHubPullRequestRecord(
     (typeof headRepositoryNameWithOwner === "string" && headRepositoryNameWithOwner.includes("/")
       ? (headRepositoryNameWithOwner.split("/")[0] ?? null)
       : null);
+  const checkRollupState =
+    raw.statusCheckRollup === undefined || raw.statusCheckRollup === null
+      ? undefined
+      : normalizeCheckRollup(raw.statusCheckRollup).state;
 
   return {
     number: raw.number,
@@ -101,6 +107,9 @@ function normalizeGitHubPullRequestRecord(
       : {}),
     ...(headRepositoryNameWithOwner ? { headRepositoryNameWithOwner } : {}),
     ...(headRepositoryOwnerLogin ? { headRepositoryOwnerLogin } : {}),
+    ...(checkRollupState !== undefined && checkRollupState !== "unknown"
+      ? { checkRollupState }
+      : {}),
   };
 }
 
@@ -501,13 +510,15 @@ export function decodeGitHubPullRequestReviewSnapshot(input: {
     }
   }
 
-  const resolvedThreadCount = threads.filter((thread) => thread.isResolved).length;
+  const resolvedThreadCount = threads.filter(
+    (thread) => thread.isResolved || thread.isOutdated,
+  ).length;
   const unresolvedThreadCount = threads.length - resolvedThreadCount;
   const resolvedCommentCount = threads
-    .filter((thread) => thread.isResolved)
+    .filter((thread) => thread.isResolved || thread.isOutdated)
     .reduce((count, thread) => count + thread.comments.length, 0);
   const unresolvedCommentCount = threads
-    .filter((thread) => !thread.isResolved)
+    .filter((thread) => !thread.isResolved && !thread.isOutdated)
     .reduce((count, thread) => count + thread.comments.length, 0);
 
   return Result.succeed({

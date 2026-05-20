@@ -46,6 +46,9 @@ function toChangeRequest(summary: GitHubCli.GitHubPullRequestSummary): ChangeReq
     ...(summary.headRepositoryOwnerLogin !== undefined
       ? { headRepositoryOwnerLogin: summary.headRepositoryOwnerLogin }
       : {}),
+    ...(summary.checkRollupState !== undefined
+      ? { checkRollupState: summary.checkRollupState }
+      : {}),
   };
 }
 
@@ -124,7 +127,7 @@ export const make = Effect.fn("makeGitHubSourceControlProvider")(function* () {
             "--limit",
             String(input.limit ?? 20),
             "--json",
-            "number,title,url,baseRefName,headRefName,state,mergedAt,updatedAt,isCrossRepository,headRepository,headRepositoryOwner",
+            "number,title,url,baseRefName,headRefName,state,mergedAt,updatedAt,isCrossRepository,headRepository,headRepositoryOwner,statusCheckRollup",
           ],
         })
         .pipe(

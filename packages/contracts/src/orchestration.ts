@@ -645,6 +645,14 @@ const ThreadSessionStopCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadActivityAppendCommand = Schema.Struct({
+  type: Schema.Literal("thread.activity.append"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  activity: OrchestrationThreadActivity,
+  createdAt: IsoDateTime,
+});
+
 const DispatchableClientOrchestrationCommand = Schema.Union([
   ProjectCreateCommand,
   ProjectMetaUpdateCommand,
@@ -683,6 +691,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadUserInputRespondCommand,
   ThreadCheckpointRevertCommand,
   ThreadSessionStopCommand,
+  ThreadActivityAppendCommand,
 ]);
 export type ClientOrchestrationCommand = typeof ClientOrchestrationCommand.Type;
 
@@ -732,14 +741,6 @@ const ThreadTurnDiffCompleteCommand = Schema.Struct({
   files: Schema.Array(OrchestrationCheckpointFile),
   assistantMessageId: Schema.optional(MessageId),
   checkpointTurnCount: NonNegativeInt,
-  createdAt: IsoDateTime,
-});
-
-const ThreadActivityAppendCommand = Schema.Struct({
-  type: Schema.Literal("thread.activity.append"),
-  commandId: CommandId,
-  threadId: ThreadId,
-  activity: OrchestrationThreadActivity,
   createdAt: IsoDateTime,
 });
 

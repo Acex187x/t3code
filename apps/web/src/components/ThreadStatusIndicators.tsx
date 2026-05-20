@@ -39,6 +39,22 @@ export function prStatusIndicator(
   const presentation = resolveChangeRequestPresentation(provider);
 
   if (pr.state === "open") {
+    if (pr.checkRollupState === "failure") {
+      return {
+        label: `${presentation.shortName} open · checks failing`,
+        colorClass: "text-red-600 dark:text-red-400/90",
+        tooltip: `#${pr.number} ${presentation.shortName} open · checks failing: ${pr.title}`,
+        url: pr.url,
+      };
+    }
+    if (pr.checkRollupState === "pending") {
+      return {
+        label: `${presentation.shortName} open · checks pending`,
+        colorClass: "text-amber-500 dark:text-amber-300/90",
+        tooltip: `#${pr.number} ${presentation.shortName} open · checks pending: ${pr.title}`,
+        url: pr.url,
+      };
+    }
     return {
       label: `${presentation.shortName} open`,
       colorClass: "text-emerald-600 dark:text-emerald-300/90",

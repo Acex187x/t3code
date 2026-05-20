@@ -133,6 +133,16 @@ export function PullRequestThreadDialog({
     reference: resolvedPullRequest ? String(resolvedPullRequest.number) : null,
     enabled: open && gitStatus?.sourceControlProvider?.kind === "github",
   });
+  const reviewThreadCounts = reviewSnapshotState.data
+    ? {
+        unresolved: reviewSnapshotState.data.threads.filter(
+          (thread) => !thread.isResolved && !thread.isOutdated,
+        ).length,
+        resolved: reviewSnapshotState.data.threads.filter(
+          (thread) => thread.isResolved || thread.isOutdated,
+        ).length,
+      }
+    : null;
   const isResolving =
     open &&
     parsedReference !== null &&
@@ -286,10 +296,10 @@ export function PullRequestThreadDialog({
                           {reviewSnapshotState.data.commentCount} comments
                         </span>
                         <span className="rounded-md bg-background/70 px-1.5 py-0.5 text-muted-foreground">
-                          {reviewSnapshotState.data.unresolvedCommentCount} unresolved
+                          {reviewThreadCounts?.unresolved ?? 0} unresolved
                         </span>
                         <span className="rounded-md bg-background/70 px-1.5 py-0.5 text-muted-foreground">
-                          {reviewSnapshotState.data.resolvedCommentCount} resolved
+                          {reviewThreadCounts?.resolved ?? 0} resolved
                         </span>
                       </>
                     ) : reviewSnapshotState.isLoading ? (

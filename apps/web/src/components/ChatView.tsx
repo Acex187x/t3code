@@ -3,6 +3,7 @@ import {
   DEFAULT_MODEL,
   defaultInstanceIdForDriver,
   type EnvironmentId,
+  EventId,
   type MessageId,
   type ModelSelection,
   type ProjectScript,
@@ -824,6 +825,49 @@ export default function ChatView(props: ChatViewProps) {
     [activeThread],
   );
   const activeThreadKey = activeThreadRef ? scopedThreadKey(activeThreadRef) : null;
+  const [reviewReadyToPushResetAtByThreadKey, setReviewReadyToPushResetAtByThreadKey] = useState<
+    Readonly<Record<string, string>>
+  >({});
+  const activeReviewReadyToPushResetAt = activeThreadKey
+    ? (reviewReadyToPushResetAtByThreadKey[activeThreadKey] ?? null)
+    : null;
+  const formatReviewQueuePersistError = useCallback((error: unknown): string => {
+    if (error instanceof Error && error.message.trim().length > 0) {
+      return error.message;
+    }
+    if (typeof error === "string" && error.trim().length > 0) {
+      return error;
+    }
+    if (error && typeof error === "object") {
+      const message = "message" in error ? error.message : undefined;
+      if (typeof message === "string" && message.trim().length > 0) {
+        return message;
+      }
+      const tag = "_tag" in error ? error._tag : undefined;
+      if (typeof tag === "string" && tag.trim().length > 0) {
+        return tag;
+      }
+      try {
+        const serialized = JSON.stringify(error);
+        if (serialized && serialized !== "{}") {
+          return serialized;
+        }
+      } catch {
+        // Fall through to String(error).
+      }
+    }
+    const fallback = String(error);
+    return fallback && fallback !== "[object Object]" ? fallback : "unknown error";
+  }, []);
+  const handleReviewPushSucceeded = useCallback(() => {
+    if (!activeThreadKey) {
+      return;
+    }
+    setReviewReadyToPushResetAtByThreadKey((current) => ({
+      ...current,
+      [activeThreadKey]: new Date().toISOString(),
+    }));
+  }, [activeThreadKey]);
   const existingOpenTerminalThreadKeys = useMemo(() => {
     const existingThreadKeys = new Set<string>([...serverThreadKeys, ...draftThreadKeys]);
     return openTerminalThreadKeys.filter((nextThreadKey) => existingThreadKeys.has(nextThreadKey));
@@ -1363,6 +1407,7 @@ export default function ChatView(props: ChatViewProps) {
     threadError: activeThread?.error,
   });
   const isWorking = phase === "running" || isSendBusy || isConnecting || isRevertingCheckpoint;
+  const activeTurnInProgress = isWorking || !latestTurnSettled;
   const activeWorkStartedAt = deriveActiveWorkStartedAt(
     activeLatestTurn,
     activeThread?.session ?? null,
@@ -2143,7 +2188,6 @@ export default function ChatView(props: ChatViewProps) {
           activePlan?.turnId ?? sidebarProposedPlan?.turnId ?? "__dismissed__";
       } else {
         planSidebarDismissedForTurnRef.current = null;
-        setReviewSidebarOpen(false);
       }
       return !open;
     });
@@ -2367,7 +2411,7 @@ export default function ChatView(props: ChatViewProps) {
   });
 
   const handleSendPullRequestReviewContext = useCallback(
-    async (markdown: string) => {
+    async (markdown: string, queuedThreadIds: ReadonlySet<string>) => {
       if (!activeThread || !activeProject) {
         return;
       }
@@ -2379,6 +2423,43 @@ export default function ChatView(props: ChatViewProps) {
 
       const createdAt = new Date().toISOString();
       const titleSeed = "Address PR review comments";
+      let queuedPersistError: unknown = null;
+      const appendQueuedReviewActivities = async () => {
+        for (const reviewThreadId of queuedThreadIds) {
+          const activityCreatedAt = new Date().toISOString();
+          await api.orchestration.dispatchCommand({
+            type: "thread.activity.append",
+            commandId: newCommandId(),
+            threadId: activeThread.id,
+            activity: {
+              id: EventId.make(randomUUID()),
+              tone: "tool",
+              kind: "tool.completed",
+              summary: "Review comment queued",
+              payload: {
+                data: {
+                  toolName: "set_review_comment_status",
+                  input: {
+                    reviewThreadId,
+                    status: "queued",
+                    note: "Queued for the agent.",
+                  },
+                },
+              },
+              turnId: null,
+              createdAt: activityCreatedAt,
+            },
+            createdAt: activityCreatedAt,
+          });
+        }
+      };
+      const tryAppendQueuedReviewActivities = async () => {
+        try {
+          await appendQueuedReviewActivities();
+        } catch (error) {
+          queuedPersistError ??= error;
+        }
+      };
       const bootstrap = isLocalDraftThread
         ? {
             createThread: {
@@ -2393,6 +2474,10 @@ export default function ChatView(props: ChatViewProps) {
             },
           }
         : undefined;
+
+      if (!isLocalDraftThread) {
+        await tryAppendQueuedReviewActivities();
+      }
 
       await api.orchestration.dispatchCommand({
         type: "thread.turn.start",
@@ -2411,11 +2496,25 @@ export default function ChatView(props: ChatViewProps) {
         ...(bootstrap ? { bootstrap } : {}),
         createdAt,
       });
+
+      if (isLocalDraftThread) {
+        await tryAppendQueuedReviewActivities();
+      }
+
+      if (queuedPersistError !== null) {
+        setThreadError(
+          activeThread.id,
+          `Review context was sent, but queued statuses were not persisted: ${formatReviewQueuePersistError(
+            queuedPersistError,
+          )}`,
+        );
+      }
     },
     [
       activeProject,
       activeThread,
       activeThreadBranch,
+      formatReviewQueuePersistError,
       interactionMode,
       isLocalDraftThread,
       runtimeMode,
@@ -3621,6 +3720,7 @@ export default function ChatView(props: ChatViewProps) {
           onToggleTerminal={toggleTerminalVisibility}
           onToggleDiff={onToggleDiff}
           onOpenReviewSidebar={openPullRequestReviewSidebar}
+          onReviewPushSucceeded={handleReviewPushSucceeded}
         />
       </header>
 
@@ -3829,6 +3929,8 @@ export default function ChatView(props: ChatViewProps) {
             markdownCwd={gitCwd ?? undefined}
             mode="sidebar"
             activities={activeThread.activities}
+            readyToPushResetAt={activeReviewReadyToPushResetAt}
+            turnInProgress={activeTurnInProgress}
             onClose={closePullRequestReviewSidebar}
             onSendReviewContext={handleSendPullRequestReviewContext}
           />
@@ -3869,7 +3971,7 @@ export default function ChatView(props: ChatViewProps) {
         </RightPanelSheet>
       ) : null}
       {shouldUsePlanSidebarSheet ? (
-        <RightPanelSheet open={reviewSidebarOpen} onClose={closePullRequestReviewSidebar}>
+        <RightPanelSheet open={reviewSidebarOpen} onClose={() => undefined}>
           <PullRequestReviewSidebar
             environmentId={activeThread.environmentId}
             cwd={gitCwd}
@@ -3877,6 +3979,8 @@ export default function ChatView(props: ChatViewProps) {
             markdownCwd={gitCwd ?? undefined}
             mode="sheet"
             activities={activeThread.activities}
+            readyToPushResetAt={activeReviewReadyToPushResetAt}
+            turnInProgress={activeTurnInProgress}
             onClose={closePullRequestReviewSidebar}
             onSendReviewContext={handleSendPullRequestReviewContext}
           />

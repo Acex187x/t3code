@@ -71,7 +71,7 @@ import { z } from "zod";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
-import { PULL_REQUEST_REVIEW_DEVELOPER_INSTRUCTIONS } from "../CodexDeveloperInstructions.ts";
+import { PULL_REQUEST_REVIEW_DEVELOPER_INSTRUCTIONS_WITH_TOOLS } from "../CodexDeveloperInstructions.ts";
 import { makeClaudeEnvironment } from "../Drivers/ClaudeHome.ts";
 import {
   getClaudeModelCapabilities,
@@ -689,8 +689,12 @@ const CLAUDE_SETTING_SOURCES = [
 ] as const satisfies ReadonlyArray<SettingSource>;
 
 const REVIEW_COMMENT_WORKFLOW_STATUSES = [
+  "queued",
   "in_progress",
+  "done",
   "ready_to_push",
+  "addressed",
+  "ignored",
   "in_review",
   "unresolved",
   "resolved",
@@ -2997,7 +3001,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
               status: z
                 .enum(REVIEW_COMMENT_WORKFLOW_STATUSES)
                 .describe(
-                  "Workflow status: in_progress, ready_to_push, in_review, unresolved, or resolved.",
+                  "Workflow status: queued, in_progress, done, ready_to_push, addressed, ignored, in_review, unresolved, or resolved.",
                 ),
               note: z
                 .string()
@@ -3228,7 +3232,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         systemPrompt: {
           type: "preset",
           preset: "claude_code",
-          append: PULL_REQUEST_REVIEW_DEVELOPER_INSTRUCTIONS,
+          append: PULL_REQUEST_REVIEW_DEVELOPER_INSTRUCTIONS_WITH_TOOLS,
         },
         settingSources: [...CLAUDE_SETTING_SOURCES],
         // The SDK type lags the CLI here: Opus 4.7 accepts `xhigh` even though

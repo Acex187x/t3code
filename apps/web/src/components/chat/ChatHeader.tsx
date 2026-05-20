@@ -48,6 +48,7 @@ interface ChatHeaderProps {
   onToggleTerminal: () => void;
   onToggleDiff: () => void;
   onOpenReviewSidebar: () => void;
+  onReviewPushSucceeded?: () => void;
 }
 
 export function shouldShowOpenInPicker(input: {
@@ -99,6 +100,7 @@ export const ChatHeader = memo(function ChatHeader({
   onToggleTerminal,
   onToggleDiff,
   onOpenReviewSidebar,
+  onReviewPushSucceeded,
 }: ChatHeaderProps) {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const showOpenInPicker = shouldShowOpenInPicker({
@@ -152,6 +154,7 @@ export const ChatHeader = memo(function ChatHeader({
             gitCwd={gitCwd}
             activeThreadRef={scopeThreadRef(activeThreadEnvironmentId, activeThreadId)}
             {...(draftId ? { draftId } : {})}
+            {...(onReviewPushSucceeded ? { onPushSucceeded: onReviewPushSucceeded } : {})}
           />
         )}
         {activeProjectName ? (
@@ -266,8 +269,11 @@ function PullRequestReviewHeaderControl({
     return null;
   }
 
+  const unresolvedThreadCount = snapshot?.threads.filter(
+    (thread) => !thread.isResolved && !thread.isOutdated,
+  ).length;
   const tooltip = snapshot
-    ? `#${snapshot.number}: ${snapshot.unresolvedCommentCount} unresolved, ${reviewSummaryLabel(
+    ? `#${snapshot.number}: ${unresolvedThreadCount} unresolved, ${reviewSummaryLabel(
         snapshot,
       )}, ${reviewDecisionLabel(snapshot)}, ${checksLabel(snapshot)}`
     : error
@@ -291,7 +297,7 @@ function PullRequestReviewHeaderControl({
             ) : (
               <MessageSquareTextIcon className="size-3" />
             )}
-            <span>{snapshot ? snapshot.unresolvedCommentCount : "..."}</span>
+            <span>{unresolvedThreadCount ?? "..."}</span>
             {snapshot ? (
               <span className="hidden @4xl/header-actions:inline">unresolved</span>
             ) : null}

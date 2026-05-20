@@ -22,6 +22,16 @@ export type SourceControlProviderInfo = typeof SourceControlProviderInfo.Type;
 export const ChangeRequestState = Schema.Literals(["open", "closed", "merged"]);
 export type ChangeRequestState = typeof ChangeRequestState.Type;
 
+export const SourceControlCheckRollupState = Schema.Literals([
+  "success",
+  "pending",
+  "failure",
+  "neutral",
+  "skipped",
+  "unknown",
+]);
+export type SourceControlCheckRollupState = typeof SourceControlCheckRollupState.Type;
+
 export const ChangeRequest = Schema.Struct({
   provider: SourceControlProviderKind,
   number: PositiveInt,
@@ -34,6 +44,7 @@ export const ChangeRequest = Schema.Struct({
   isCrossRepository: Schema.optional(Schema.Boolean),
   headRepositoryNameWithOwner: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   headRepositoryOwnerLogin: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  checkRollupState: Schema.optional(SourceControlCheckRollupState),
 });
 export type ChangeRequest = typeof ChangeRequest.Type;
 
@@ -113,16 +124,6 @@ export const SourceControlChangeRequestReviewState = Schema.Literals([
 ]);
 export type SourceControlChangeRequestReviewState =
   typeof SourceControlChangeRequestReviewState.Type;
-
-export const SourceControlCheckRollupState = Schema.Literals([
-  "success",
-  "pending",
-  "failure",
-  "neutral",
-  "skipped",
-  "unknown",
-]);
-export type SourceControlCheckRollupState = typeof SourceControlCheckRollupState.Type;
 
 export const SourceControlReviewCommentState = Schema.Literals([
   "approved",

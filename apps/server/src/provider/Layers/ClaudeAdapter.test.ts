@@ -35,7 +35,7 @@ import * as TestClock from "effect/testing/TestClock";
 import { attachmentRelativePath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
-import { PULL_REQUEST_REVIEW_DEVELOPER_INSTRUCTIONS } from "../CodexDeveloperInstructions.ts";
+import { PULL_REQUEST_REVIEW_DEVELOPER_INSTRUCTIONS_WITH_TOOLS } from "../CodexDeveloperInstructions.ts";
 import { ProviderAdapterValidationError } from "../Errors.ts";
 import type { ClaudeAdapterShape } from "../Services/ClaudeAdapter.ts";
 import { makeClaudeAdapter, type ClaudeAdapterLiveOptions } from "./ClaudeAdapter.ts";
@@ -353,7 +353,7 @@ describe("ClaudeAdapterLive", () => {
       assert.deepEqual(createInput?.options.systemPrompt, {
         type: "preset",
         preset: "claude_code",
-        append: PULL_REQUEST_REVIEW_DEVELOPER_INSTRUCTIONS,
+        append: PULL_REQUEST_REVIEW_DEVELOPER_INSTRUCTIONS_WITH_TOOLS,
       });
       assert.deepEqual(Object.keys(createInput?.options.mcpServers ?? {}), ["t3-pr-review"]);
     }).pipe(

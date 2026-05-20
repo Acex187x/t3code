@@ -81,7 +81,7 @@ describe("GitHubCli.layer", () => {
           "view",
           "#42",
           "--json",
-          "number,title,url,baseRefName,headRefName,state,mergedAt,isCrossRepository,headRepository,headRepositoryOwner",
+          "number,title,url,baseRefName,headRefName,state,mergedAt,isCrossRepository,headRepository,headRepositoryOwner,statusCheckRollup",
         ],
         cwd: "/repo",
         timeoutMs: 30_000,
@@ -316,6 +316,32 @@ describe("GitHubCli.layer", () => {
                                 ],
                               },
                             },
+                            {
+                              id: "PRRT_3",
+                              isResolved: false,
+                              isOutdated: true,
+                              path: "src/old.ts",
+                              line: 9,
+                              startLine: null,
+                              comments: {
+                                nodes: [
+                                  {
+                                    id: "PRRC_3",
+                                    databaseId: 125,
+                                    author: { login: "reviewer" },
+                                    body: "Outdated.",
+                                    url: "https://github.com/acme/repo/pull/42#discussion_r125",
+                                    path: "src/old.ts",
+                                    diffHunk: null,
+                                    line: 9,
+                                    startLine: null,
+                                    createdAt: "2026-05-19T00:00:00.000Z",
+                                    updatedAt: "2026-05-19T00:00:00.000Z",
+                                    pullRequestReview: { state: "COMMENTED" },
+                                  },
+                                ],
+                              },
+                            },
                           ],
                         },
                       },
@@ -340,9 +366,11 @@ describe("GitHubCli.layer", () => {
       assert.strictEqual(result.checks.items.length, 2);
       assert.strictEqual(result.checks.items[0]?.name, "Vercel");
       assert.strictEqual(result.checks.items[1]?.state, "pending");
-      assert.strictEqual(result.commentCount, 2);
+      assert.strictEqual(result.unresolvedThreadCount, 1);
+      assert.strictEqual(result.resolvedThreadCount, 2);
+      assert.strictEqual(result.commentCount, 3);
       assert.strictEqual(result.unresolvedCommentCount, 1);
-      assert.strictEqual(result.resolvedCommentCount, 1);
+      assert.strictEqual(result.resolvedCommentCount, 2);
       assert.strictEqual(result.threads[0]?.comments[0]?.reviewState, "changes_requested");
       expect(mockRun).toHaveBeenLastCalledWith({
         operation: "GitHubCli.execute",
