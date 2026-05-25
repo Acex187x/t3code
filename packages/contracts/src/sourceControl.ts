@@ -135,6 +135,29 @@ export const SourceControlReviewCommentState = Schema.Literals([
 ]);
 export type SourceControlReviewCommentState = typeof SourceControlReviewCommentState.Type;
 
+export const SourceControlReviewCommentWorkflowStatus = Schema.Literals([
+  "queued",
+  "in_progress",
+  "done",
+  "ready_to_push",
+  "addressed",
+  "ignored",
+  "in_review",
+  "unresolved",
+  "resolved",
+]);
+export type SourceControlReviewCommentWorkflowStatus =
+  typeof SourceControlReviewCommentWorkflowStatus.Type;
+
+export const SourceControlReviewCommentWorkflowSource = Schema.Literals([
+  "agent",
+  "ui",
+  "system",
+  "github",
+]);
+export type SourceControlReviewCommentWorkflowSource =
+  typeof SourceControlReviewCommentWorkflowSource.Type;
+
 export const SourceControlReviewComment = Schema.Struct({
   id: TrimmedNonEmptyString,
   databaseId: Schema.NullOr(NonNegativeInt),

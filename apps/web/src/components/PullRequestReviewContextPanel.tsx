@@ -1,5 +1,4 @@
 import type {
-  OrchestrationThreadActivity,
   SourceControlChangeRequestReviewSnapshot,
   SourceControlCheckRunSummary,
 } from "@t3tools/contracts";
@@ -21,6 +20,12 @@ import {
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { cn } from "~/lib/utils";
+import {
+  nextReviewAttemptContext,
+  type ReviewCommentWorkflowStatus,
+  type ReviewCommentWorkflowStatusMap,
+  type ReviewCommentWorkflowStatusRecord,
+} from "~/reviewCommentWorkflow";
 import ChatMarkdown from "./ChatMarkdown";
 import { Button } from "./ui/button";
 import { Checkbox } from "./ui/checkbox";
@@ -41,54 +46,6 @@ interface PullRequestReviewContextPanelProps {
   readonly markdownCwd?: string | undefined;
   readonly mode?: "panel" | "sidebar";
   readonly workflowStatuses?: ReviewCommentWorkflowStatusMap | undefined;
-}
-
-export type ReviewCommentWorkflowStatus =
-  | "queued"
-  | "in_progress"
-  | "done"
-  | "ready_to_push"
-  | "addressed"
-  | "ignored"
-  | "in_review"
-  | "unresolved"
-  | "resolved";
-
-export interface ReviewCommentWorkflowStatusRecord {
-  readonly status: ReviewCommentWorkflowStatus;
-  readonly note: string | null;
-  readonly updatedAt: string;
-  readonly attemptCount: number;
-}
-
-export interface ReviewCommentWorkflowStatusMap {
-  readonly byThreadId: ReadonlyMap<string, ReviewCommentWorkflowStatusRecord>;
-  readonly byCommentId: ReadonlyMap<string, ReviewCommentWorkflowStatusRecord>;
-}
-
-interface BuildReviewCommentWorkflowStatusesOptions {
-  readonly readyToPushResetAt?: string | null | undefined;
-  readonly turnInProgress?: boolean | undefined;
-  readonly queuedThreadIds?: ReadonlySet<string> | undefined;
-}
-
-const REVIEW_COMMENT_WORKFLOW_STATUSES = new Set<ReviewCommentWorkflowStatus>([
-  "queued",
-  "in_progress",
-  "done",
-  "ready_to_push",
-  "addressed",
-  "ignored",
-  "in_review",
-  "unresolved",
-  "resolved",
-]);
-
-function isReviewCommentWorkflowStatus(value: unknown): value is ReviewCommentWorkflowStatus {
-  return (
-    typeof value === "string" &&
-    REVIEW_COMMENT_WORKFLOW_STATUSES.has(value as ReviewCommentWorkflowStatus)
-  );
 }
 
 function workflowStatusLabel(status: ReviewCommentWorkflowStatus): string {
@@ -164,186 +121,6 @@ function reviewContextErrorMessage(error: unknown): string {
   }
   const fallback = String(error);
   return fallback && fallback !== "[object Object]" ? fallback : "Failed to send review context.";
-}
-
-export function buildReviewCommentWorkflowStatuses(
-  activities: ReadonlyArray<OrchestrationThreadActivity>,
-  options: BuildReviewCommentWorkflowStatusesOptions = {},
-): ReviewCommentWorkflowStatusMap {
-  const byThreadId = new Map<string, ReviewCommentWorkflowStatusRecord>();
-  const byCommentId = new Map<string, ReviewCommentWorkflowStatusRecord>();
-  const attemptCountByThreadId = new Map<string, number>();
-  const attemptCountByCommentId = new Map<string, number>();
-  const resetAt = options.readyToPushResetAt ?? null;
-  const turnInProgress = options.turnInProgress ?? false;
-
-  for (const activity of activities) {
-    if (activity.kind !== "tool.updated" && activity.kind !== "tool.completed") {
-      continue;
-    }
-    const payload = activity.payload as
-      | {
-          readonly data?: {
-            readonly toolName?: unknown;
-            readonly input?: {
-              readonly reviewThreadId?: unknown;
-              readonly commentId?: unknown;
-              readonly status?: unknown;
-              readonly note?: unknown;
-            };
-          };
-        }
-      | null
-      | undefined;
-    const data = payload?.data;
-    if (data?.toolName !== "set_review_comment_status") {
-      continue;
-    }
-    const input = data.input;
-    if (!input || typeof input.reviewThreadId !== "string") {
-      continue;
-    }
-    if (!isReviewCommentWorkflowStatus(input.status)) {
-      continue;
-    }
-    const commentId =
-      typeof input.commentId === "string" && input.commentId.length > 0 ? input.commentId : null;
-    if (input.status === "in_progress") {
-      attemptCountByThreadId.set(
-        input.reviewThreadId,
-        (attemptCountByThreadId.get(input.reviewThreadId) ?? 0) + 1,
-      );
-      if (commentId !== null) {
-        attemptCountByCommentId.set(commentId, (attemptCountByCommentId.get(commentId) ?? 0) + 1);
-      }
-    }
-    const attemptCount =
-      input.status === "queued"
-        ? nextAttemptCount(byThreadId.get(input.reviewThreadId) ?? null)
-        : Math.max(1, attemptCountByThreadId.get(input.reviewThreadId) ?? 0);
-    const record: ReviewCommentWorkflowStatusRecord = {
-      status: input.status,
-      note:
-        typeof input.note === "string" && input.note.trim().length > 0 ? input.note.trim() : null,
-      updatedAt: activity.createdAt,
-      attemptCount,
-    };
-    byThreadId.set(input.reviewThreadId, record);
-    if (commentId !== null) {
-      byCommentId.set(commentId, {
-        ...record,
-        attemptCount: Math.max(1, attemptCountByCommentId.get(commentId) ?? attemptCount),
-      });
-    }
-  }
-
-  if (!turnInProgress) {
-    promoteDoneStatuses(byThreadId);
-    promoteDoneStatuses(byCommentId);
-    ignoreQueuedStatuses(byThreadId);
-    ignoreQueuedStatuses(byCommentId);
-  }
-
-  if (resetAt !== null) {
-    addressReadyToPushStatuses(byThreadId, resetAt);
-    addressReadyToPushStatuses(byCommentId, resetAt);
-  }
-
-  if (turnInProgress) {
-    for (const threadId of options.queuedThreadIds ?? []) {
-      const existing = byThreadId.get(threadId) ?? null;
-      if (
-        existing !== null &&
-        existing.status !== "addressed" &&
-        existing.status !== "unresolved"
-      ) {
-        continue;
-      }
-      const attemptCount = nextAttemptCount(existing);
-      byThreadId.set(threadId, {
-        status: "queued",
-        note: "Queued for the agent.",
-        updatedAt: new Date().toISOString(),
-        attemptCount,
-      });
-    }
-  }
-
-  return { byThreadId, byCommentId };
-}
-
-function promoteDoneStatuses(records: Map<string, ReviewCommentWorkflowStatusRecord>) {
-  for (const [key, record] of records) {
-    if (record.status !== "done") {
-      continue;
-    }
-    records.set(key, {
-      ...record,
-      status: "ready_to_push",
-      note: record.note ?? "Agent finished; ready to push.",
-    });
-  }
-}
-
-function ignoreQueuedStatuses(records: Map<string, ReviewCommentWorkflowStatusRecord>) {
-  for (const [key, record] of records) {
-    if (record.status !== "queued") {
-      continue;
-    }
-    records.set(key, {
-      ...record,
-      status: "ignored",
-      note: record.note ?? "Agent finished without taking this comment.",
-    });
-  }
-}
-
-function addressReadyToPushStatuses(
-  records: Map<string, ReviewCommentWorkflowStatusRecord>,
-  resetAt: string,
-) {
-  const resetTime = Date.parse(resetAt);
-  if (!Number.isFinite(resetTime)) {
-    return;
-  }
-
-  for (const [key, record] of records) {
-    if (record.status !== "ready_to_push") {
-      continue;
-    }
-    const updatedTime = Date.parse(record.updatedAt);
-    if (!Number.isFinite(updatedTime) || updatedTime > resetTime) {
-      continue;
-    }
-    records.set(key, {
-      status: "addressed",
-      note: "Pushed; waiting for review resolution.",
-      updatedAt: resetAt,
-      attemptCount: record.attemptCount,
-    });
-  }
-}
-
-function nextAttemptCount(record: ReviewCommentWorkflowStatusRecord | null): number {
-  if (record === null) {
-    return 1;
-  }
-  return record.status === "queued" || record.status === "in_progress"
-    ? record.attemptCount
-    : record.attemptCount + 1;
-}
-
-function nextReviewAttemptContext(
-  record: ReviewCommentWorkflowStatusRecord | null,
-): ReviewAttemptContext | null {
-  if (record === null) {
-    return null;
-  }
-  if (record.status === "resolved" || record.status === "unresolved") {
-    return null;
-  }
-  const attemptNumber = nextAttemptCount(record);
-  return attemptNumber > 1 ? { attemptNumber } : null;
 }
 
 function ReviewWorkflowStatusBadge({
@@ -596,8 +373,15 @@ export function PullRequestReviewContextPanel({
   const selectedThreadCount = snapshot.threads.filter((thread) =>
     selectedThreadIds.has(thread.id),
   ).length;
-  const unresolvedThreadCount = snapshot.threads.filter(isActionableReviewThread).length;
-  const resolvedThreadCount = snapshot.threads.length - unresolvedThreadCount;
+  const unresolvedThreads = snapshot.threads.filter(isActionableReviewThread);
+  const resolvedThreads = snapshot.threads.filter((thread) => !isActionableReviewThread(thread));
+  const unresolvedThreadCount = unresolvedThreads.length;
+  const resolvedThreadCount = resolvedThreads.length;
+  const allUnresolvedSelected =
+    unresolvedThreadCount > 0 &&
+    unresolvedThreads.every((thread) => selectedThreadIds.has(thread.id));
+  const allResolvedSelected =
+    resolvedThreadCount > 0 && resolvedThreads.every((thread) => selectedThreadIds.has(thread.id));
   const groupedThreads = useMemo(
     () =>
       snapshot.threads.toSorted(
@@ -649,10 +433,23 @@ export function PullRequestReviewContextPanel({
     }
   };
 
-  const setAllSelected = () =>
-    setSelectedThreadIds(new Set(snapshot.threads.map((thread) => thread.id)));
-  const setNoneSelected = () => setSelectedThreadIds(new Set());
-  const setUnresolvedSelected = () => setSelectedThreadIds(defaultSelectedIds);
+  const toggleGroupSelection = useCallback(
+    (group: "unresolved" | "resolved", select: boolean) => {
+      setSelectedThreadIds((current) => {
+        const next = new Set(current);
+        const targets = group === "unresolved" ? unresolvedThreads : resolvedThreads;
+        for (const thread of targets) {
+          if (select) {
+            next.add(thread.id);
+          } else {
+            next.delete(thread.id);
+          }
+        }
+        return next;
+      });
+    },
+    [resolvedThreads, unresolvedThreads],
+  );
 
   const toggleExpanded = (threadId: string) => {
     setExpandedThreadIds((current) => {
@@ -684,6 +481,9 @@ export function PullRequestReviewContextPanel({
         const threadWorkflowStatus = isActionable
           ? (workflowStatuses?.byThreadId.get(thread.id) ?? null)
           : null;
+        const groupCount = isActionable ? unresolvedThreadCount : resolvedThreadCount;
+        const allGroupSelected = isActionable ? allUnresolvedSelected : allResolvedSelected;
+        const groupKey = isActionable ? "unresolved" : "resolved";
         return (
           <Fragment key={thread.id}>
             {startsGroup ? (
@@ -691,9 +491,18 @@ export function PullRequestReviewContextPanel({
                 <SectionHeader
                   title={isActionable ? "Unresolved" : "Resolved"}
                   right={
-                    isActionable
-                      ? `${unresolvedThreadCount} thread${unresolvedThreadCount === 1 ? "" : "s"}`
-                      : `${resolvedThreadCount} thread${resolvedThreadCount === 1 ? "" : "s"}`
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        className="rounded-sm px-1.5 py-0.5 text-[10px] text-muted-foreground/70 transition-colors hover:bg-muted/40 hover:text-foreground"
+                        onClick={() => toggleGroupSelection(groupKey, !allGroupSelected)}
+                      >
+                        {allGroupSelected ? "Clear" : "Select all"}
+                      </button>
+                      <span className="text-[10px] text-muted-foreground/60">
+                        {groupCount} thread{groupCount === 1 ? "" : "s"}
+                      </span>
+                    </div>
                   }
                 />
               </div>
@@ -791,32 +600,6 @@ export function PullRequestReviewContextPanel({
     </div>
   );
 
-  const commentsControls = (
-    <section className="space-y-2">
-      <SectionHeader
-        title="Comments"
-        right={
-          <span>
-            {unresolvedThreadCount} unresolved
-            {resolvedThreadCount > 0 ? ` · ${resolvedThreadCount} resolved` : null}
-          </span>
-        }
-      />
-      <SectionHeader title="Selection" right={`${selectedThreadCount} selected`} />
-      <div className="flex gap-1">
-        <Button type="button" size="xs" variant="outline" onClick={setUnresolvedSelected}>
-          Select unresolved
-        </Button>
-        <Button type="button" size="xs" variant="outline" onClick={setAllSelected}>
-          Select all
-        </Button>
-        <Button type="button" size="xs" variant="outline" onClick={setNoneSelected}>
-          Clear
-        </Button>
-      </div>
-    </section>
-  );
-
   const sendActions = (
     <div className="flex items-center justify-end gap-1.5">
       <Button
@@ -848,14 +631,14 @@ export function PullRequestReviewContextPanel({
   );
 
   if (mode === "sidebar") {
+    const hasChecks = snapshot.checks.items.length > 0;
     return (
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <div className="shrink-0 space-y-4 border-b border-border/60 p-3">
-          {snapshot.checks.items.length > 0 ? (
+        {hasChecks ? (
+          <div className="shrink-0 border-b border-border/60 p-3">
             <PullRequestChecksList checks={snapshot.checks} />
-          ) : null}
-          {commentsControls}
-        </div>
+          </div>
+        ) : null}
         <ScrollArea className="min-h-0 flex-1">
           <div className="p-3">{snapshot.threads.length > 0 ? reviewThreads : emptyThreads}</div>
         </ScrollArea>
@@ -870,7 +653,6 @@ export function PullRequestReviewContextPanel({
   return (
     <div className="space-y-4 rounded-lg border border-border/70 bg-muted/16 p-3">
       {snapshot.checks.items.length > 0 ? <PullRequestChecksList checks={snapshot.checks} /> : null}
-      {commentsControls}
       {snapshot.threads.length > 0 ? (
         <ScrollArea className="max-h-72" scrollFade>
           {reviewThreads}

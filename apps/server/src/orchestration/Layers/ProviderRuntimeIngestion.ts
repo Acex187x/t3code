@@ -263,6 +263,31 @@ function requestKindFromCanonicalRequestType(
   }
 }
 
+function reviewCommentStatusSummary(status: string): string {
+  switch (status) {
+    case "queued":
+      return "Review comment queued";
+    case "in_progress":
+      return "Review comment in progress";
+    case "done":
+      return "Review comment done";
+    case "ready_to_push":
+      return "Review comment ready to push";
+    case "addressed":
+      return "Review comment addressed";
+    case "ignored":
+      return "Review comment ignored";
+    case "in_review":
+      return "Review comment in review";
+    case "unresolved":
+      return "Review comment unresolved";
+    case "resolved":
+      return "Review comment resolved";
+    default:
+      return "Review comment status changed";
+  }
+}
+
 function runtimeEventToActivities(
   event: ProviderRuntimeEvent,
 ): ReadonlyArray<OrchestrationThreadActivity> {
@@ -484,6 +509,29 @@ function runtimeEventToActivities(
             status: event.payload.status,
             ...(event.payload.summary ? { detail: truncateDetail(event.payload.summary) } : {}),
             ...(event.payload.usage !== undefined ? { usage: event.payload.usage } : {}),
+          },
+          turnId: toTurnId(event.turnId) ?? null,
+          ...maybeSequence,
+        },
+      ];
+    }
+
+    case "review-comment.status.changed": {
+      const source = event.payload.source ?? "agent";
+      return [
+        {
+          id: event.eventId,
+          createdAt: event.createdAt,
+          tone: source === "agent" ? "tool" : "info",
+          kind: "review-comment.status.changed",
+          summary: reviewCommentStatusSummary(event.payload.status),
+          payload: {
+            reviewThreadId: event.payload.reviewThreadId,
+            ...(event.payload.commentId ? { commentId: event.payload.commentId } : {}),
+            status: event.payload.status,
+            ...(event.payload.note ? { note: truncateDetail(event.payload.note) } : {}),
+            ...(event.payload.attempt !== undefined ? { attempt: event.payload.attempt } : {}),
+            source,
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,

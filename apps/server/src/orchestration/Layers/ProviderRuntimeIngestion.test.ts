@@ -2861,6 +2861,54 @@ describe("ProviderRuntimeIngestion", () => {
     ).toBe("# Plan title");
   });
 
+  it("projects review comment status changes as typed thread activities", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+
+    harness.emit({
+      type: "review-comment.status.changed",
+      eventId: asEventId("evt-review-comment-status"),
+      provider: ProviderDriverKind.make("claudeAgent"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-review-1"),
+      payload: {
+        reviewThreadId: "review-thread-1",
+        commentId: "comment-1",
+        status: "addressed",
+        note: "Pushed for review",
+        attempt: 2,
+        source: "agent",
+      },
+    });
+
+    const thread = await waitForThread(harness.readModel, (entry) =>
+      entry.activities.some(
+        (activity: ProviderRuntimeTestActivity) =>
+          activity.kind === "review-comment.status.changed",
+      ),
+    );
+
+    const activity = thread.activities.find(
+      (entry: ProviderRuntimeTestActivity) => entry.id === "evt-review-comment-status",
+    );
+    const payload =
+      activity?.payload && typeof activity.payload === "object"
+        ? (activity.payload as Record<string, unknown>)
+        : undefined;
+
+    expect(activity?.tone).toBe("tool");
+    expect(activity?.summary).toBe("Review comment addressed");
+    expect(payload).toMatchObject({
+      reviewThreadId: "review-thread-1",
+      commentId: "comment-1",
+      status: "addressed",
+      note: "Pushed for review",
+      attempt: 2,
+      source: "agent",
+    });
+  });
+
   it("projects structured user input request and resolution as thread activities", async () => {
     const harness = await createHarness();
     const now = "2026-01-01T00:00:00.000Z";

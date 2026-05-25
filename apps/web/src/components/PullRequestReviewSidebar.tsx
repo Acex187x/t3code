@@ -1,15 +1,25 @@
 import type { EnvironmentId, OrchestrationThreadActivity } from "@t3tools/contracts";
 import { ExternalLinkIcon, MessageSquareTextIcon, PanelRightCloseIcon } from "lucide-react";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 
 import { useChangeRequestReviewSnapshot } from "~/lib/changeRequestReviewState";
+import { buildReviewCommentWorkflowStatuses } from "~/reviewCommentWorkflow";
 import { Button } from "./ui/button";
 import { Spinner } from "./ui/spinner";
-import {
-  buildReviewCommentWorkflowStatuses,
-  PullRequestReviewContextPanel,
-} from "./PullRequestReviewContextPanel";
+import { PullRequestReviewContextPanel } from "./PullRequestReviewContextPanel";
 import { cn } from "~/lib/utils";
+
+type SidebarTab = "review" | "files" | "overview";
+
+const SIDEBAR_TABS: ReadonlyArray<{
+  readonly id: SidebarTab;
+  readonly label: string;
+  readonly available: boolean;
+}> = [
+  { id: "review", label: "Review", available: true },
+  { id: "files", label: "Files", available: false },
+  { id: "overview", label: "Overview", available: false },
+];
 
 interface PullRequestReviewSidebarProps {
   readonly environmentId: EnvironmentId;
@@ -83,6 +93,56 @@ function reviewSummaryText(snapshot: {
   return parts.length > 0 ? parts.join(" · ") : null;
 }
 
+function SidebarTabStrip({
+  activeTab,
+  onSelectTab,
+}: {
+  readonly activeTab: SidebarTab;
+  readonly onSelectTab: (tab: SidebarTab) => void;
+}) {
+  return (
+    <div className="flex gap-1 overflow-x-auto">
+      {SIDEBAR_TABS.map((tab) => {
+        const selected = tab.id === activeTab;
+        return (
+          <button
+            key={tab.id}
+            type="button"
+            className="shrink-0 rounded-md disabled:cursor-not-allowed"
+            disabled={!tab.available}
+            onClick={() => tab.available && onSelectTab(tab.id)}
+            title={tab.available ? undefined : "Coming soon"}
+            data-sidebar-tab-selected={selected}
+          >
+            <div
+              className={cn(
+                "rounded-md border px-2 py-1 text-left transition-colors",
+                selected
+                  ? "border-border bg-accent text-accent-foreground"
+                  : "border-border/70 bg-background/70 text-muted-foreground/80",
+                tab.available && !selected && "hover:border-border hover:text-foreground/80",
+                !tab.available && "opacity-50",
+              )}
+            >
+              <div className="text-[10px] font-medium leading-tight">{tab.label}</div>
+            </div>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function SidebarTabPlaceholder({ label }: { readonly label: string }) {
+  return (
+    <div className="flex min-h-0 flex-1 items-center justify-center px-5 py-8 text-center">
+      <p className="text-[11px] text-muted-foreground/70">
+        {label} view is coming soon. Use the Review tab to triage pull request comments.
+      </p>
+    </div>
+  );
+}
+
 function HeaderActions({
   url,
   onClose,
@@ -140,10 +200,12 @@ export function PullRequestReviewSidebar({
       buildReviewCommentWorkflowStatuses(activities, {
         readyToPushResetAt,
         turnInProgress,
+        reviewThreads: snapshot?.threads,
       }),
-    [activities, readyToPushResetAt, turnInProgress],
+    [activities, readyToPushResetAt, snapshot?.threads, turnInProgress],
   );
   const reviewersSummary = snapshot ? reviewSummaryText(snapshot) : null;
+  const [activeTab, setActiveTab] = useState<SidebarTab>("review");
 
   return (
     <div
@@ -174,14 +236,23 @@ export function PullRequestReviewSidebar({
                 <span className="text-[11px] text-muted-foreground/70">{reviewersSummary}</span>
               ) : null}
             </div>
+            <div className="mt-3">
+              <SidebarTabStrip activeTab={activeTab} onSelectTab={setActiveTab} />
+            </div>
           </div>
-          <PullRequestReviewContextPanel
-            snapshot={snapshot}
-            markdownCwd={markdownCwd}
-            mode="sidebar"
-            workflowStatuses={workflowStatuses}
-            onSendContext={onSendReviewContext}
-          />
+          {activeTab === "review" ? (
+            <PullRequestReviewContextPanel
+              snapshot={snapshot}
+              markdownCwd={markdownCwd}
+              mode="sidebar"
+              workflowStatuses={workflowStatuses}
+              onSendContext={onSendReviewContext}
+            />
+          ) : (
+            <SidebarTabPlaceholder
+              label={activeTab === "files" ? "Files" : "Overview"}
+            />
+          )}
         </>
       ) : (
         <div className="flex items-start justify-between gap-2 border-b border-border/60 p-3">

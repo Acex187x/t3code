@@ -700,6 +700,49 @@ const REVIEW_COMMENT_WORKFLOW_STATUSES = [
   "resolved",
 ] as const;
 
+type ReviewCommentWorkflowStatus = (typeof REVIEW_COMMENT_WORKFLOW_STATUSES)[number];
+
+interface ReviewCommentStatusToolArgs {
+  readonly reviewThreadId: string;
+  readonly commentId?: string | undefined;
+  readonly status: ReviewCommentWorkflowStatus;
+  readonly note?: string | undefined;
+}
+
+export function makeClaudeReviewCommentStatusChangedEvent(input: {
+  readonly eventId: EventId;
+  readonly createdAt: string;
+  readonly threadId: ThreadId;
+  readonly turnId?: TurnId | undefined;
+  readonly providerInstanceId: ProviderInstanceId;
+  readonly args: ReviewCommentStatusToolArgs;
+  readonly providerRefs: NonNullable<ProviderRuntimeEvent["providerRefs"]>;
+  readonly rawPayload: unknown;
+}): ProviderRuntimeEvent {
+  return {
+    type: "review-comment.status.changed",
+    eventId: input.eventId,
+    provider: PROVIDER,
+    providerInstanceId: input.providerInstanceId,
+    createdAt: input.createdAt,
+    threadId: input.threadId,
+    ...(input.turnId ? { turnId: asCanonicalTurnId(input.turnId) } : {}),
+    payload: {
+      reviewThreadId: input.args.reviewThreadId,
+      ...(input.args.commentId ? { commentId: input.args.commentId } : {}),
+      status: input.args.status,
+      ...(input.args.note ? { note: input.args.note } : {}),
+      source: "agent",
+    },
+    providerRefs: input.providerRefs,
+    raw: {
+      source: "claude.sdk.permission",
+      method: "mcp/set_review_comment_status",
+      payload: input.rawPayload,
+    },
+  };
+}
+
 function buildPromptText(
   input: ProviderSendTurnInput,
   boundInstanceId: ProviderInstanceId,
@@ -3026,31 +3069,16 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
               const stamp = await runPromise(makeEventStamp());
               await runPromise(
                 offerRuntimeEvent({
-                  type: "item.updated",
-                  eventId: stamp.eventId,
-                  provider: PROVIDER,
-                  providerInstanceId: boundInstanceId,
-                  createdAt: stamp.createdAt,
-                  threadId: context.session.threadId,
-                  ...(context.turnState
-                    ? { turnId: asCanonicalTurnId(context.turnState.turnId) }
-                    : {}),
-                  payload: {
-                    itemType: "mcp_tool_call",
-                    status: "completed",
-                    title: "Review comment status",
-                    detail: `${args.reviewThreadId}: ${args.status}`,
-                    data: {
-                      toolName: "set_review_comment_status",
-                      input: args,
-                    },
-                  },
-                  providerRefs: nativeProviderRefs(context),
-                  raw: {
-                    source: "claude.sdk.permission",
-                    method: "mcp/set_review_comment_status",
-                    payload: args,
-                  },
+                  ...makeClaudeReviewCommentStatusChangedEvent({
+                    eventId: stamp.eventId,
+                    createdAt: stamp.createdAt,
+                    threadId: context.session.threadId,
+                    ...(context.turnState ? { turnId: context.turnState.turnId } : {}),
+                    providerInstanceId: boundInstanceId,
+                    args,
+                    providerRefs: nativeProviderRefs(context),
+                    rawPayload: args,
+                  }),
                 }),
               );
 

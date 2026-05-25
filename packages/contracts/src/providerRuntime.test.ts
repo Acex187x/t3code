@@ -181,4 +181,61 @@ describe("ProviderRuntimeEvent", () => {
     expect(parsed.payload.usage.maxTokens).toBe(200000);
     expect(parsed.payload.usage.usedTokens).toBe(31251);
   });
+
+  it("decodes review-comment.status.changed events", () => {
+    const parsed = decodeRuntimeEvent({
+      type: "review-comment.status.changed",
+      eventId: "event-review-status-1",
+      provider: "claudeAgent",
+      createdAt: "2026-02-28T00:00:05.000Z",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      payload: {
+        reviewThreadId: "review-thread-1",
+        commentId: "comment-1",
+        status: "in_progress",
+        note: "Working on it",
+        attempt: 2,
+        source: "agent",
+      },
+    });
+
+    expect(parsed.type).toBe("review-comment.status.changed");
+    if (parsed.type !== "review-comment.status.changed") {
+      throw new Error("expected review-comment.status.changed");
+    }
+    expect(parsed.payload.reviewThreadId).toBe("review-thread-1");
+    expect(parsed.payload.status).toBe("in_progress");
+    expect(parsed.payload.source).toBe("agent");
+  });
+
+  it("rejects invalid review comment status payloads", () => {
+    expect(() =>
+      decodeRuntimeEvent({
+        type: "review-comment.status.changed",
+        eventId: "event-review-status-invalid",
+        provider: "claudeAgent",
+        createdAt: "2026-02-28T00:00:05.000Z",
+        threadId: "thread-1",
+        payload: {
+          reviewThreadId: "review-thread-1",
+          status: "started",
+        },
+      }),
+    ).toThrow();
+
+    expect(() =>
+      decodeRuntimeEvent({
+        type: "review-comment.status.changed",
+        eventId: "event-review-status-empty-thread",
+        provider: "claudeAgent",
+        createdAt: "2026-02-28T00:00:05.000Z",
+        threadId: "thread-1",
+        payload: {
+          reviewThreadId: "   ",
+          status: "queued",
+        },
+      }),
+    ).toThrow();
+  });
 });

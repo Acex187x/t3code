@@ -4,8 +4,8 @@ import {
   EventId,
   IsoDateTime,
   NonNegativeInt,
-  ProviderItemId,
   PositiveInt,
+  ProviderItemId,
   RuntimeItemId,
   RuntimeRequestId,
   RuntimeTaskId,
@@ -14,6 +14,10 @@ import {
   TurnId,
 } from "./baseSchemas.ts";
 import { ProviderInstanceId, ProviderDriverKind } from "./providerInstance.ts";
+import {
+  SourceControlReviewCommentWorkflowSource,
+  SourceControlReviewCommentWorkflowStatus,
+} from "./sourceControl.ts";
 
 const TrimmedNonEmptyStringSchema = TrimmedNonEmptyString;
 const UnknownRecordSchema = Schema.Record(Schema.String, Schema.Unknown);
@@ -177,6 +181,7 @@ const ProviderRuntimeEventType = Schema.Literals([
   "task.started",
   "task.progress",
   "task.completed",
+  "review-comment.status.changed",
   "hook.started",
   "hook.progress",
   "hook.completed",
@@ -227,6 +232,7 @@ const UserInputResolvedType = Schema.Literal("user-input.resolved");
 const TaskStartedType = Schema.Literal("task.started");
 const TaskProgressType = Schema.Literal("task.progress");
 const TaskCompletedType = Schema.Literal("task.completed");
+const ReviewCommentStatusChangedType = Schema.Literal("review-comment.status.changed");
 const HookStartedType = Schema.Literal("hook.started");
 const HookProgressType = Schema.Literal("hook.progress");
 const HookCompletedType = Schema.Literal("hook.completed");
@@ -481,6 +487,16 @@ const TaskCompletedPayload = Schema.Struct({
   usage: Schema.optional(Schema.Unknown),
 });
 export type TaskCompletedPayload = typeof TaskCompletedPayload.Type;
+
+const ReviewCommentStatusChangedPayload = Schema.Struct({
+  reviewThreadId: TrimmedNonEmptyStringSchema,
+  commentId: Schema.optional(TrimmedNonEmptyStringSchema),
+  status: SourceControlReviewCommentWorkflowStatus,
+  note: Schema.optional(TrimmedNonEmptyStringSchema),
+  attempt: Schema.optional(PositiveInt),
+  source: Schema.optional(SourceControlReviewCommentWorkflowSource),
+});
+export type ReviewCommentStatusChangedPayload = typeof ReviewCommentStatusChangedPayload.Type;
 
 const HookStartedPayload = Schema.Struct({
   hookId: TrimmedNonEmptyStringSchema,
@@ -833,6 +849,14 @@ const ProviderRuntimeTaskCompletedEvent = Schema.Struct({
 });
 export type ProviderRuntimeTaskCompletedEvent = typeof ProviderRuntimeTaskCompletedEvent.Type;
 
+const ProviderRuntimeReviewCommentStatusChangedEvent = Schema.Struct({
+  ...ProviderRuntimeEventBase.fields,
+  type: ReviewCommentStatusChangedType,
+  payload: ReviewCommentStatusChangedPayload,
+});
+export type ProviderRuntimeReviewCommentStatusChangedEvent =
+  typeof ProviderRuntimeReviewCommentStatusChangedEvent.Type;
+
 const ProviderRuntimeHookStartedEvent = Schema.Struct({
   ...ProviderRuntimeEventBase.fields,
   type: HookStartedType,
@@ -980,6 +1004,7 @@ export const ProviderRuntimeEventV2 = Schema.Union([
   ProviderRuntimeTaskStartedEvent,
   ProviderRuntimeTaskProgressEvent,
   ProviderRuntimeTaskCompletedEvent,
+  ProviderRuntimeReviewCommentStatusChangedEvent,
   ProviderRuntimeHookStartedEvent,
   ProviderRuntimeHookProgressEvent,
   ProviderRuntimeHookCompletedEvent,

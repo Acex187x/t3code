@@ -14,12 +14,14 @@ import type {
 import {
   ApprovalRequestId,
   ClaudeSettings,
+  EventId,
   ProviderDriverKind,
+  ProviderInstanceId,
   ProviderItemId,
   ProviderRuntimeEvent,
   type RuntimeMode,
   ThreadId,
-  ProviderInstanceId,
+  TurnId,
 } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
 import { assert, describe, it } from "@effect/vitest";
@@ -38,7 +40,11 @@ import { ServerSettingsService } from "../../serverSettings.ts";
 import { PULL_REQUEST_REVIEW_DEVELOPER_INSTRUCTIONS_WITH_TOOLS } from "../CodexDeveloperInstructions.ts";
 import { ProviderAdapterValidationError } from "../Errors.ts";
 import type { ClaudeAdapterShape } from "../Services/ClaudeAdapter.ts";
-import { makeClaudeAdapter, type ClaudeAdapterLiveOptions } from "./ClaudeAdapter.ts";
+import {
+  makeClaudeAdapter,
+  makeClaudeReviewCommentStatusChangedEvent,
+  type ClaudeAdapterLiveOptions,
+} from "./ClaudeAdapter.ts";
 const decodeClaudeSettings = Schema.decodeSync(ClaudeSettings);
 
 // Test-local service tag so the rest of the file can keep using `yield* ClaudeAdapter`.
@@ -360,6 +366,51 @@ describe("ClaudeAdapterLive", () => {
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),
     );
+  });
+
+  it("builds typed runtime events for Claude review comment status MCP updates", () => {
+    const event = makeClaudeReviewCommentStatusChangedEvent({
+      eventId: "event-review-status-1" as EventId,
+      createdAt: "2026-05-19T00:00:00.000Z",
+      threadId: THREAD_ID,
+      turnId: "turn-1" as TurnId,
+      providerInstanceId: ProviderInstanceId.make("claudeAgent_default"),
+      args: {
+        reviewThreadId: "review-thread-1",
+        commentId: "comment-1",
+        status: "done",
+        note: "Patched locally",
+      },
+      providerRefs: {},
+      rawPayload: {
+        reviewThreadId: "review-thread-1",
+        commentId: "comment-1",
+        status: "done",
+        note: "Patched locally",
+      },
+    });
+
+    assert.equal(event.type, "review-comment.status.changed");
+    if (event.type !== "review-comment.status.changed") {
+      throw new Error("expected review-comment.status.changed");
+    }
+    assert.deepEqual(event.payload, {
+      reviewThreadId: "review-thread-1",
+      commentId: "comment-1",
+      status: "done",
+      note: "Patched locally",
+      source: "agent",
+    });
+    assert.deepEqual(event.raw, {
+      source: "claude.sdk.permission",
+      method: "mcp/set_review_comment_status",
+      payload: {
+        reviewThreadId: "review-thread-1",
+        commentId: "comment-1",
+        status: "done",
+        note: "Patched locally",
+      },
+    });
   });
 
   it.effect("uses bypass permissions for full-access claude sessions", () => {

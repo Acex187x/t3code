@@ -1,7 +1,10 @@
 import { EventId, TurnId, type OrchestrationThreadActivity } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
-import { buildReviewCommentWorkflowStatuses } from "./PullRequestReviewContextPanel";
+import {
+  buildReviewCommentWorkflowStatuses,
+  createReviewCommentStatusChangedActivity,
+} from "./reviewCommentWorkflow";
 
 function activity(
   input: Omit<Partial<OrchestrationThreadActivity>, "id"> & {
@@ -28,6 +31,37 @@ function activity(
 }
 
 describe("buildReviewCommentWorkflowStatuses", () => {
+  it("keeps the latest typed workflow status by review thread and comment", () => {
+    const result = buildReviewCommentWorkflowStatuses([
+      createReviewCommentStatusChangedActivity({
+        id: "activity-1",
+        createdAt: "2026-05-19T00:00:00.000Z",
+        reviewThreadId: "thread-1",
+        commentId: "comment-1",
+        status: "in_progress",
+        source: "agent",
+      }),
+      createReviewCommentStatusChangedActivity({
+        id: "activity-2",
+        createdAt: "2026-05-19T00:01:00.000Z",
+        reviewThreadId: "thread-1",
+        commentId: "comment-1",
+        status: "ready_to_push",
+        note: "Patch is ready",
+        source: "agent",
+      }),
+    ]);
+
+    expect(result.byThreadId.get("thread-1")).toMatchObject({
+      status: "ready_to_push",
+      note: "Patch is ready",
+    });
+    expect(result.byCommentId.get("comment-1")).toMatchObject({
+      status: "ready_to_push",
+      note: "Patch is ready",
+    });
+  });
+
   it("keeps the latest workflow status by review thread and comment", () => {
     const result = buildReviewCommentWorkflowStatuses([
       activity({
@@ -299,5 +333,78 @@ describe("buildReviewCommentWorkflowStatuses", () => {
 
     expect(result.byThreadId.size).toBe(0);
     expect(result.byCommentId.size).toBe(0);
+  });
+
+  it("hides stale workflow statuses for resolved or outdated threads", () => {
+    const result = buildReviewCommentWorkflowStatuses(
+      [
+        createReviewCommentStatusChangedActivity({
+          id: "activity-1",
+          createdAt: "2026-05-19T00:00:00.000Z",
+          reviewThreadId: "thread-resolved",
+          commentId: "comment-resolved",
+          status: "ready_to_push",
+          source: "agent",
+        }),
+        createReviewCommentStatusChangedActivity({
+          id: "activity-2",
+          createdAt: "2026-05-19T00:01:00.000Z",
+          reviewThreadId: "thread-outdated",
+          commentId: "comment-outdated",
+          status: "addressed",
+          source: "agent",
+        }),
+      ],
+      {
+        reviewThreads: [
+          {
+            id: "thread-resolved",
+            isResolved: true,
+            isOutdated: false,
+            comments: [{ id: "comment-resolved" }],
+          },
+          {
+            id: "thread-outdated",
+            isResolved: false,
+            isOutdated: true,
+            comments: [{ id: "comment-outdated" }],
+          },
+        ],
+      },
+    );
+
+    expect(result.byThreadId.has("thread-resolved")).toBe(false);
+    expect(result.byCommentId.has("comment-resolved")).toBe(false);
+    expect(result.byThreadId.has("thread-outdated")).toBe(false);
+    expect(result.byCommentId.has("comment-outdated")).toBe(false);
+  });
+
+  it("keeps an active new attempt visible for a resolved thread", () => {
+    const result = buildReviewCommentWorkflowStatuses(
+      [
+        createReviewCommentStatusChangedActivity({
+          id: "activity-1",
+          createdAt: "2026-05-19T00:00:00.000Z",
+          reviewThreadId: "thread-1",
+          commentId: "comment-1",
+          status: "queued",
+          source: "ui",
+        }),
+      ],
+      {
+        turnInProgress: true,
+        reviewThreads: [
+          {
+            id: "thread-1",
+            isResolved: true,
+            isOutdated: false,
+            comments: [{ id: "comment-1" }],
+          },
+        ],
+      },
+    );
+
+    expect(result.byThreadId.get("thread-1")).toMatchObject({ status: "queued" });
+    expect(result.byCommentId.get("comment-1")).toMatchObject({ status: "queued" });
   });
 });

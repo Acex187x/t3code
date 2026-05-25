@@ -4,9 +4,11 @@ export interface DiffRouteSearch {
   diff?: "1" | undefined;
   diffTurnId?: TurnId | undefined;
   diffFilePath?: string | undefined;
+  review?: "1" | undefined;
+  reviewReference?: string | undefined;
 }
 
-function isDiffOpenValue(value: unknown): boolean {
+function isOpenValue(value: unknown): boolean {
   return value === "1" || value === 1 || value === true;
 }
 
@@ -25,8 +27,24 @@ export function stripDiffSearchParams<T extends Record<string, unknown>>(
   return rest as Omit<T, "diff" | "diffTurnId" | "diffFilePath">;
 }
 
+export function stripReviewSearchParams<T extends Record<string, unknown>>(
+  params: T,
+): Omit<T, "review" | "reviewReference"> {
+  const { review: _review, reviewReference: _reviewReference, ...rest } = params;
+  return rest as Omit<T, "review" | "reviewReference">;
+}
+
+export function stripRightPanelSearchParams<T extends Record<string, unknown>>(
+  params: T,
+): Omit<T, "diff" | "diffTurnId" | "diffFilePath" | "review" | "reviewReference"> {
+  return stripReviewSearchParams(stripDiffSearchParams(params));
+}
+
 export function parseDiffRouteSearch(search: Record<string, unknown>): DiffRouteSearch {
-  const diff = isDiffOpenValue(search.diff) ? "1" : undefined;
+  const reviewOpen = isOpenValue(search.review);
+  const review = reviewOpen ? "1" : undefined;
+  const reviewReference = review ? normalizeSearchString(search.reviewReference) : undefined;
+  const diff = !reviewOpen && isOpenValue(search.diff) ? "1" : undefined;
   const diffTurnIdRaw = diff ? normalizeSearchString(search.diffTurnId) : undefined;
   const diffTurnId = diffTurnIdRaw ? TurnId.make(diffTurnIdRaw) : undefined;
   const diffFilePath = diff && diffTurnId ? normalizeSearchString(search.diffFilePath) : undefined;
@@ -35,5 +53,7 @@ export function parseDiffRouteSearch(search: Record<string, unknown>): DiffRoute
     ...(diff ? { diff } : {}),
     ...(diffTurnId ? { diffTurnId } : {}),
     ...(diffFilePath ? { diffFilePath } : {}),
+    ...(review ? { review } : {}),
+    ...(reviewReference ? { reviewReference } : {}),
   };
 }

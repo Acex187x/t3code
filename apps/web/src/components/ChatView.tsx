@@ -3,7 +3,6 @@ import {
   DEFAULT_MODEL,
   defaultInstanceIdForDriver,
   type EnvironmentId,
-  EventId,
   type MessageId,
   type ModelSelection,
   type ProjectScript,
@@ -44,7 +43,12 @@ import { usePrimaryEnvironmentId } from "../environments/primary";
 import { readEnvironmentApi } from "../environmentApi";
 import { isElectron } from "../env";
 import { readLocalApi } from "../localApi";
-import { parseDiffRouteSearch, stripDiffSearchParams } from "../diffRouteSearch";
+import {
+  parseDiffRouteSearch,
+  stripDiffSearchParams,
+  stripReviewSearchParams,
+  stripRightPanelSearchParams,
+} from "../diffRouteSearch";
 import {
   collapseExpandedComposerCursor,
   parseStandaloneComposerSlashCommand,
@@ -178,6 +182,7 @@ import {
   waitForStartedServerThread,
 } from "./ChatView.logic";
 import { useLocalStorage } from "~/hooks/useLocalStorage";
+import { createReviewCommentStatusChangedActivity } from "~/reviewCommentWorkflow";
 import { useComposerHandleContext } from "../composerHandleContext";
 import {
   useServerAvailableEditors,
@@ -1763,8 +1768,8 @@ export default function ChatView(props: ChatViewProps) {
       },
       replace: true,
       search: (previous) => {
-        const rest = stripDiffSearchParams(previous);
-        return diffOpen ? { ...rest, diff: undefined } : { ...rest, diff: "1" };
+        const rest = stripRightPanelSearchParams(previous);
+        return diffOpen ? rest : { ...rest, diff: "1" };
       },
     });
   }, [diffOpen, environmentId, isServerThread, navigate, onDiffPanelOpen, threadId]);
@@ -2431,24 +2436,14 @@ export default function ChatView(props: ChatViewProps) {
             type: "thread.activity.append",
             commandId: newCommandId(),
             threadId: activeThread.id,
-            activity: {
-              id: EventId.make(randomUUID()),
-              tone: "tool",
-              kind: "tool.completed",
-              summary: "Review comment queued",
-              payload: {
-                data: {
-                  toolName: "set_review_comment_status",
-                  input: {
-                    reviewThreadId,
-                    status: "queued",
-                    note: "Queued for the agent.",
-                  },
-                },
-              },
-              turnId: null,
+            activity: createReviewCommentStatusChangedActivity({
+              id: randomUUID(),
               createdAt: activityCreatedAt,
-            },
+              reviewThreadId,
+              status: "queued",
+              note: "Queued for the agent.",
+              source: "ui",
+            }),
             createdAt: activityCreatedAt,
           });
         }
@@ -3650,7 +3645,7 @@ export default function ChatView(props: ChatViewProps) {
           threadId,
         },
         search: (previous) => {
-          const rest = stripDiffSearchParams(previous);
+          const rest = stripRightPanelSearchParams(previous);
           return filePath
             ? { ...rest, diff: "1", diffTurnId: turnId, diffFilePath: filePath }
             : { ...rest, diff: "1", diffTurnId: turnId };
