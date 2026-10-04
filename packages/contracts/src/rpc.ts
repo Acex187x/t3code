@@ -151,6 +151,7 @@ import {
   PullRequestDetail,
   PullRequestPreview,
   PullRequestChecks,
+  PullRequestDeployment,
   PullRequestDiffFileContentsInput,
   PullRequestDiffFileContentsResult,
   PullRequestFilesViewedResult,
@@ -490,6 +491,7 @@ export const WS_METHODS = {
   pullRequestsDetail: "pullRequests.detail",
   pullRequestsPreview: "pullRequests.preview",
   pullRequestsChecks: "pullRequests.checks",
+  pullRequestsDeployments: "pullRequests.deployments",
   pullRequestsActivity: "pullRequests.activity",
   pullRequestsThreadComments: "pullRequests.threadComments",
   pullRequestsDiffFileContents: "pullRequests.diffFileContents",
@@ -949,6 +951,13 @@ const WsPullRequestsPreviewRpc = Rpc.make(WS_METHODS.pullRequestsPreview, {
 const WsPullRequestsChecksRpc = Rpc.make(WS_METHODS.pullRequestsChecks, {
   payload: PullRequestRef,
   success: Schema.NullOr(PullRequestChecks),
+  error: PullRequestRpcError,
+});
+
+/** Null where the host keeps no deployments; an empty list where it keeps none for this one. */
+const WsPullRequestsDeploymentsRpc = Rpc.make(WS_METHODS.pullRequestsDeployments, {
+  payload: PullRequestRef,
+  success: Schema.NullOr(Schema.Array(PullRequestDeployment)),
   error: PullRequestRpcError,
 });
 
@@ -1768,6 +1777,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsPullRequestsDetailRpc,
   WsPullRequestsPreviewRpc,
   WsPullRequestsChecksRpc,
+  WsPullRequestsDeploymentsRpc,
   WsPullRequestsActivityRpc,
   WsPullRequestsThreadCommentsRpc,
   WsPullRequestsDiffFileContentsRpc,

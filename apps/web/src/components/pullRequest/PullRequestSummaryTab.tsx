@@ -5,6 +5,7 @@ import type {
   PullRequestRef,
   PullRequestReviewThread,
   ScopedThreadRef,
+  PullRequestDeployment,
 } from "@t3tools/contracts";
 import {
   ArrowDownUpIcon,
@@ -37,6 +38,7 @@ import {
   pullRequestReviewOutcomeRingClassName,
   pullRequestReviewOutcomeStaleLabel,
 } from "./pullRequestPresentation";
+import { PullRequestDeploymentList } from "./PullRequestDeploymentList";
 import { PullRequestLabelPicker } from "./PullRequestLabelPicker";
 import { PullRequestReviewerPicker } from "./PullRequestReviewerPicker";
 import { PullRequestActivityUnavailableState } from "./PullRequestActivityUnavailableState";
@@ -459,6 +461,7 @@ export function PullRequestSummaryTab({
   threadRef,
   reference,
   detail,
+  deployments = [],
   activityPending,
   checksStale = false,
   activityError,
@@ -473,6 +476,8 @@ export function PullRequestSummaryTab({
   threadRef: ScopedThreadRef | null;
   reference: PullRequestRef;
   detail: PullRequestDetailView;
+  /** Read beside the detail, on request; empty where the host keeps none or was not asked. */
+  deployments?: ReadonlyArray<PullRequestDeployment>;
   activityPending: boolean;
   checksStale?: boolean;
   activityError: string | null;
@@ -858,6 +863,12 @@ export function PullRequestSummaryTab({
           )}
         </div>
       </Section>
+
+      {deployments.length > 0 ? (
+        <Section key={`deployments:${detail.url}`} title="Deployments">
+          <PullRequestDeploymentList deployments={deployments} threadRef={threadRef} />
+        </Section>
+      ) : null}
 
       <Section key={`checks:${detail.url}`} title="Checks" defaultOpen={false}>
         {checksStale ? (

@@ -34,6 +34,7 @@ import {
   type PullRequestDetail,
   type PullRequestPreview,
   type PullRequestChecks,
+  type PullRequestDeployment,
   type PullRequestDiffFileContentsInput,
   type PullRequestDiffFileContentsResult,
   type PullRequestDiffStat,
@@ -215,6 +216,10 @@ export class PullRequestService extends Context.Service<
     readonly checks: (
       input: PullRequestRef,
     ) => Effect.Effect<PullRequestChecks | null, PullRequestError>;
+    /** Null where the host keeps no deployments. Read on request and cached like the checks. */
+    readonly deployments: (
+      input: PullRequestRef,
+    ) => Effect.Effect<ReadonlyArray<PullRequestDeployment> | null, PullRequestError>;
     readonly activity: (
       input: PullRequestRef,
     ) => Effect.Effect<PullRequestActivity, PullRequestError>;
@@ -570,6 +575,14 @@ function withRateLimitBackoff(
     ...(api.getChangeRequestChecks === undefined
       ? {}
       : { getChangeRequestChecks: wrap("getChangeRequestChecks", api.getChangeRequestChecks) }),
+    ...(api.getChangeRequestDeployments === undefined
+      ? {}
+      : {
+          getChangeRequestDeployments: wrap(
+            "getChangeRequestDeployments",
+            api.getChangeRequestDeployments,
+          ),
+        }),
     ...(api.getChangeRequestSummary === undefined
       ? {}
       : {
@@ -2914,6 +2927,30 @@ export const make = Effect.gen(function* () {
     },
   );
 
+  const deploymentsCache = yield* Cache.makeWith(
+    (key: string) => {
+      const input = refOfCacheKey(key);
+      return requireProject(input).pipe(
+        Effect.flatMap((project) =>
+          project.api.getChangeRequestDeployments === undefined
+            ? Effect.succeed(null)
+            : project.api
+                .getChangeRequestDeployments({
+                  cwd: project.project.workspaceRoot,
+                  repository: project.repository,
+                  host: project.host,
+                  number: input.number,
+                })
+                .pipe(Effect.mapError(toPullRequestError("deployments"))),
+        ),
+      );
+    },
+    {
+      capacity: DETAIL_CACHE_CAPACITY,
+      timeToLive: (exit) => (Exit.isSuccess(exit) ? DETAIL_CACHE_TTL : Duration.zero),
+    },
+  );
+
   const detailCache = yield* Cache.makeWith(
     (key: string) => {
       const statsKey = statsCacheKey(key);
@@ -3282,6 +3319,7 @@ export const make = Effect.gen(function* () {
     refreshAfterTurn,
     detail: credentialCached(detail),
     checks: credentialCached((input) => Cache.get(checksCache, refCacheKey(input))),
+    deployments: credentialCached((input) => Cache.get(deploymentsCache, refCacheKey(input))),
     activity: credentialCached(activity),
     preview: credentialCached(preview),
     threadComments,

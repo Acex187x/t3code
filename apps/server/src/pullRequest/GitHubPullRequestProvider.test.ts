@@ -737,6 +737,7 @@ describe("getViewerPermissions", () => {
   ) =>
     Layer.mock(GitHubPullRequestCli.GitHubPullRequestCli)({
       revalidateChecks: (_input, read) => read,
+      getPullRequestDeployments: () => Effect.succeed([]),
       getPullRequestDetail: () => Effect.succeed(openDetail),
       getPullRequestBaseComparison: () => comparison,
       getViewerAccess: () =>
@@ -1092,3 +1093,32 @@ describe("loginAvatarUrl", () => {
     }
   });
 });
+
+it.effect("reads deployments on request, naming the operation when the host refuses", () =>
+  Effect.gen(function* () {
+    const provider = yield* make;
+    const read = provider.getChangeRequestDeployments;
+    if (read === undefined) return yield* Effect.die("deployments read missing");
+    const input = { cwd: "/w", repository: "acme/web", host: "github.com", number: 7 };
+    expect(yield* read(input)).toEqual([]);
+    const error = yield* read({ ...input, number: 8 }).pipe(Effect.flip);
+    expect(error.operation).toBe("getChangeRequestDeployments");
+    expect(provider.capabilities.deployments).toBe(true);
+  }).pipe(
+    Effect.provide(
+      Layer.mock(GitHubPullRequestCli.GitHubPullRequestCli)({
+        getPullRequestDeployments: (input) =>
+          input.number === 7
+            ? Effect.succeed([])
+            : Effect.fail(
+                new GitHubPullRequestCli.GitHubPullRequestReadError({
+                  command: "gh",
+                  cwd: "/w",
+                  operation: "getPullRequestDeployments",
+                  cause: new Error("Resource not accessible by personal access token"),
+                }),
+              ),
+      }),
+    ),
+  ),
+);

@@ -2768,6 +2768,12 @@ const makeWsRpcLayer = (
             withPullRequestViewer(input, pullRequests.checks(input)),
             { "rpc.aggregate": "pull-requests" },
           ),
+        [WS_METHODS.pullRequestsDeployments]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.pullRequestsDeployments,
+            withPullRequestViewer(input, pullRequests.deployments(input)),
+            { "rpc.aggregate": "pull-requests" },
+          ),
         [WS_METHODS.pullRequestsActivity]: (input) =>
           observeRpcEffect(
             WS_METHODS.pullRequestsActivity,

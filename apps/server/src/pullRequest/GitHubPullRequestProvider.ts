@@ -49,6 +49,7 @@ const CAPABILITIES: PullRequestCapabilities = {
   stacks: true,
   stackActions: true,
   labels: true,
+  deployments: true,
 };
 
 /**
@@ -368,6 +369,11 @@ export const make = Effect.gen(function* () {
         Effect.map(({ state, checks }) => ({ state, checks })),
         Effect.mapError(fail("getChangeRequestChecks")),
       ),
+
+    getChangeRequestDeployments: (input) =>
+      cli
+        .getPullRequestDeployments(input)
+        .pipe(Effect.mapError(fail("getChangeRequestDeployments"))),
 
     getChangeRequest: (input) =>
       readChecks(input).pipe(

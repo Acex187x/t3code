@@ -27,6 +27,7 @@ import {
   reviewThreadConversation,
   REVIEW_THREADS_GRAPHQL_QUERY,
   pullRequestCoreGraphQlQuery,
+  decodePullRequestDeploymentsJson,
   pullRequestSearchGraphQlQuery,
 } from "./gitHubPullRequestJson.ts";
 
@@ -1992,5 +1993,194 @@ describe("batched pull request summaries", () => {
     );
     expect(decoded.get(0)?.stack).toBeNull();
     expect(decoded.get(1)?.stack).toEqual({ number: 3, size: 2, base: "main", position: 2 });
+  });
+});
+
+describe("pull request deployment decoding", () => {
+  const HEAD = "head000000000000000000000000000000000000";
+  const OLD = "old0000000000000000000000000000000000000";
+  const deployment = (overrides: Record<string, unknown>) => ({
+    environment: "Preview",
+    state: "ACTIVE",
+    createdAt: "2026-07-02T00:00:00Z",
+    creator: { login: "vercel" },
+    latestStatus: { state: "SUCCESS", environmentUrl: "https://web-abc.vercel.app" },
+    ...overrides,
+  });
+  const response = (
+    commits: ReadonlyArray<{ oid: string; deployments: ReadonlyArray<unknown> | null }>,
+    statuses: ReadonlyArray<unknown> = [],
+  ) =>
+    JSON.stringify({
+      data: {
+        repository: {
+          pullRequest: {
+            headRefOid: HEAD,
+            commits: {
+              nodes: commits.map(({ oid, deployments }) => ({
+                commit: {
+                  oid,
+                  abbreviatedOid: oid.slice(0, 7),
+                  messageHeadline: `fix: ${oid.slice(0, 3)}`,
+                  deployments: deployments === null ? null : { nodes: deployments },
+                },
+              })),
+            },
+            headStatuses: { nodes: [{ commit: { status: { contexts: statuses } } }] },
+          },
+        },
+      },
+    });
+  const rows = (raw: string) =>
+    expectSuccess(decodePullRequestDeploymentsJson(raw)).map((entry) => [
+      entry.commit.shortSha,
+      entry.name,
+      entry.state,
+      entry.url,
+    ]);
+
+  it("lists each commit's environments newest first, keeping the address a redeploy left up", () => {
+    expect(
+      rows(
+        response([
+          {
+            oid: OLD,
+            deployments: [deployment({ createdAt: "2026-07-01T00:00:00Z", state: "INACTIVE" })],
+          },
+          {
+            oid: HEAD,
+            deployments: [
+              // A failed redeployment of the same environment must not hide the one that serves.
+              deployment({
+                createdAt: "2026-07-02T01:00:00Z",
+                state: "FAILURE",
+                latestStatus: { state: "FAILURE", environmentUrl: null },
+              }),
+              deployment({ createdAt: "2026-07-02T00:00:00Z" }),
+              deployment({ environment: "preview", createdAt: "2026-07-01T12:00:00Z" }),
+              deployment({
+                environment: "storybook",
+                createdAt: "2026-07-01T13:00:00Z",
+                latestStatus: { state: "SUCCESS", environmentUrl: "https://sb.example.com" },
+              }),
+            ],
+          },
+        ]),
+      ),
+    ).toEqual([
+      ["head000", "Preview", "failure", null],
+      ["head000", "Preview", "success", "https://web-abc.vercel.app/"],
+      ["head000", "storybook", "success", "https://sb.example.com/"],
+      ["old0000", "Preview", "inactive", "https://web-abc.vercel.app/"],
+    ]);
+    const [first] = expectSuccess(
+      decodePullRequestDeploymentsJson(response([{ oid: HEAD, deployments: [deployment({})] }])),
+    );
+    expect(first).toEqual({
+      name: "Preview",
+      deployer: "vercel",
+      state: "success",
+      url: "https://web-abc.vercel.app/",
+      detailsUrl: null,
+      description: null,
+      updatedAt: "2026-07-02T00:00:00Z",
+      commit: { sha: HEAD, shortSha: "head000", headline: "fix: hea", isHead: true },
+    });
+  });
+
+  it("reads Netlify's deploy preview off the head's statuses and Heroku's address off the payload", () => {
+    expect(
+      rows(
+        response(
+          [
+            {
+              oid: HEAD,
+              deployments: [
+                deployment({
+                  environment: "review-app",
+                  creator: { login: "heroku" },
+                  latestStatus: { state: "SUCCESS", environmentUrl: null },
+                  payload: JSON.stringify(
+                    JSON.stringify({ web_url: "https://review.herokuapp.com/" }),
+                  ),
+                }),
+              ],
+            },
+          ],
+          [
+            {
+              context: "netlify/decap-cms/deploy-preview",
+              state: "SUCCESS",
+              targetUrl: "https://deploy-preview-8021--decap-cms.netlify.app",
+              createdAt: "2026-07-02T00:03:00Z",
+              creator: { login: "netlify" },
+            },
+            { context: "netlify/other/deploy-preview", state: "PENDING", targetUrl: null },
+            {
+              context: "Vercel – docs",
+              state: "SUCCESS",
+              targetUrl: "https://vercel.com/acme/docs/abc",
+            },
+            null,
+          ],
+        ),
+      ),
+    ).toEqual([
+      ["head000", "decap-cms", "success", "https://deploy-preview-8021--decap-cms.netlify.app/"],
+      ["head000", "review-app", "success", "https://review.herokuapp.com/"],
+      ["head000", "other", "in-progress", null],
+    ]);
+  });
+
+  it("folds GitHub's states, keeps only open-able addresses, and drops finished rows with none", () => {
+    const states = [
+      ["ACTIVE", "success"],
+      ["QUEUED", "pending"],
+      ["IN_PROGRESS", "in-progress"],
+      ["WAITING", "waiting"],
+      ["ERROR", "failure"],
+      ["DESTROYED", "inactive"],
+      ["SOMETHING_NEW", "pending"],
+    ] as const;
+    for (const [raw, expected] of states) {
+      expect(
+        rows(response([{ oid: HEAD, deployments: [deployment({ state: raw })] }]))[0]?.[2],
+        raw,
+      ).toBe(expected);
+    }
+    expect(
+      rows(
+        response([
+          {
+            oid: HEAD,
+            deployments: [
+              deployment({
+                environment: "ipfs",
+                state: "FAILURE",
+                latestStatus: { environmentUrl: "ipfs://bafy" },
+              }),
+              deployment({
+                environment: "ci",
+                latestStatus: {
+                  state: "SUCCESS",
+                  environmentUrl: null,
+                  logUrl: "https://ci.example.com",
+                },
+              }),
+              deployment({ environment: "gone", state: "DESTROYED", latestStatus: null }),
+              deployment({
+                environment: null,
+                latestEnvironment: null,
+                createdAt: "2026-07-01T00:00:00Z",
+              }),
+            ],
+          },
+        ]),
+      ),
+    ).toEqual([
+      ["head000", "ipfs", "failure", null],
+      ["head000", "deployment", "success", "https://web-abc.vercel.app/"],
+    ]);
+    expect(rows(response([{ oid: HEAD, deployments: null }]))).toEqual([]);
   });
 });

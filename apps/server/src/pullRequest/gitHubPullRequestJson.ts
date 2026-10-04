@@ -11,6 +11,8 @@ import type {
   PullRequestChecksState,
   PullRequestComment,
   PullRequestCommit,
+  PullRequestDeployment,
+  PullRequestDeploymentState,
   PullRequestFileViewedState,
   PullRequestLabel,
   PullRequestMergeCapabilities,
@@ -785,6 +787,326 @@ export function decodePullRequestPreviewJson(
     author: toActor(data.repository.pullRequest.author),
     state: toState(data.repository.pullRequest),
   }));
+}
+
+/**
+ * The deployments left on a pull request, read on request rather than with the detail: a
+ * reader who never opens them never pays for them, and the server's own readers of the detail
+ * — the watch and sync loops — never do either. Apart from the detail for a second reason:
+ * `gh api graphql` exits non-zero on any GraphQL error, and a token that may not read
+ * deployments would otherwise fail the whole detail over one field nobody is blocked without.
+ *
+ * Two sources, one request. The host's own deployments ride on the pull request's recent
+ * commits: several rather than the head alone, because a deployer records one per push rather
+ * than per commit, and a reader asking for "the deployment" of a change often means the one
+ * before the fix-up they just pushed. A hundred per commit is GitHub's page ceiling, the same
+ * bound the checks live under. The head commit's statuses are read too, because Netlify posts
+ * its deploy preview only there, as a status whose target is the preview itself.
+ */
+export const PULL_REQUEST_DEPLOYMENTS_GRAPHQL_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      headRefOid
+      commits(last: 5) {
+        nodes { commit {
+          oid abbreviatedOid messageHeadline
+          deployments(first: 100, orderBy: {field: CREATED_AT, direction: DESC}) {
+            nodes {
+              environment latestEnvironment state description createdAt updatedAt payload
+              creator { login }
+              latestStatus { state environmentUrl logUrl description updatedAt }
+            }
+          }
+        } }
+      }
+      headStatuses: commits(last: 1) {
+        nodes { commit { status { contexts { context state targetUrl description createdAt creator { login } } } } }
+      }
+    }
+  }
+}`;
+
+/** Enum-ish fields stay strings: a state GitHub adds later must not fail the read. */
+const RawDeploymentSchema = Schema.Struct({
+  environment: Schema.optional(Schema.NullOr(Schema.String)),
+  latestEnvironment: Schema.optional(Schema.NullOr(Schema.String)),
+  state: Schema.optional(Schema.NullOr(Schema.String)),
+  description: Schema.optional(Schema.NullOr(Schema.String)),
+  createdAt: Schema.String,
+  updatedAt: Schema.optional(Schema.NullOr(Schema.String)),
+  /** Whatever the deployer attached, as a JSON string; Heroku keeps the app's address in it. */
+  payload: Schema.optional(Schema.NullOr(Schema.String)),
+  creator: Schema.optional(
+    Schema.NullOr(Schema.Struct({ login: Schema.optional(Schema.NullOr(Schema.String)) })),
+  ),
+  latestStatus: Schema.optional(
+    Schema.NullOr(
+      Schema.Struct({
+        state: Schema.optional(Schema.NullOr(Schema.String)),
+        environmentUrl: Schema.optional(Schema.NullOr(Schema.String)),
+        logUrl: Schema.optional(Schema.NullOr(Schema.String)),
+        description: Schema.optional(Schema.NullOr(Schema.String)),
+        updatedAt: Schema.optional(Schema.NullOr(Schema.String)),
+      }),
+    ),
+  ),
+});
+
+const RawDeploymentStatusContextSchema = Schema.Struct({
+  context: Schema.optional(Schema.NullOr(Schema.String)),
+  state: Schema.optional(Schema.NullOr(Schema.String)),
+  targetUrl: Schema.optional(Schema.NullOr(Schema.String)),
+  description: Schema.optional(Schema.NullOr(Schema.String)),
+  createdAt: Schema.optional(Schema.NullOr(Schema.String)),
+  creator: Schema.optional(
+    Schema.NullOr(Schema.Struct({ login: Schema.optional(Schema.NullOr(Schema.String)) })),
+  ),
+});
+
+const RawDeploymentsSchema = Schema.Struct({
+  data: Schema.Struct({
+    repository: Schema.Struct({
+      pullRequest: Schema.Struct({
+        headRefOid: Schema.optional(Schema.NullOr(Schema.String)),
+        commits: Schema.Struct({
+          nodes: Schema.Array(
+            Schema.NullOr(
+              Schema.Struct({
+                commit: Schema.Struct({
+                  oid: Schema.String,
+                  abbreviatedOid: Schema.optional(Schema.NullOr(Schema.String)),
+                  messageHeadline: Schema.optional(Schema.NullOr(Schema.String)),
+                  deployments: Schema.optional(
+                    Schema.NullOr(
+                      Schema.Struct({ nodes: Schema.Array(Schema.NullOr(RawDeploymentSchema)) }),
+                    ),
+                  ),
+                }),
+              }),
+            ),
+          ),
+        }),
+        headStatuses: Schema.optional(
+          Schema.NullOr(
+            Schema.Struct({
+              nodes: Schema.Array(
+                Schema.NullOr(
+                  Schema.Struct({
+                    commit: Schema.Struct({
+                      status: Schema.optional(
+                        Schema.NullOr(
+                          Schema.Struct({
+                            contexts: Schema.Array(Schema.NullOr(RawDeploymentStatusContextSchema)),
+                          }),
+                        ),
+                      ),
+                    }),
+                  }),
+                ),
+              ),
+            }),
+          ),
+        ),
+      }),
+    }),
+  }),
+});
+
+const decodeDeployments = decodeJsonResult(RawDeploymentsSchema);
+
+/**
+ * GitHub's deployment states, folded to the contract's six. `ACTIVE` is a success that is also
+ * the environment's current deployment; a plain `SUCCESS` is what the status said before GitHub
+ * decided that. `WAITING` is held by protection rules, which no amount of time ends, so it is
+ * not `pending`. A state this module has never heard of is read as pending: the row is kept,
+ * since a deployment GitHub lists is one the reader may want, and pending promises nothing.
+ */
+function toDeploymentState(
+  deploymentState: string | null,
+  statusState: string | null,
+): PullRequestDeploymentState {
+  switch ((deploymentState ?? statusState ?? "").toUpperCase()) {
+    case "ACTIVE":
+    case "SUCCESS":
+      return "success";
+    case "IN_PROGRESS":
+      return "in-progress";
+    case "WAITING":
+      return "waiting";
+    case "FAILURE":
+    case "ERROR":
+      return "failure";
+    case "INACTIVE":
+    case "DESTROYED":
+    case "ABANDONED":
+      return "inactive";
+    default:
+      return "pending";
+  }
+}
+
+/** A commit status's four states, read the way a deploy preview means them. */
+function toStatusDeploymentState(state: string | null): PullRequestDeploymentState {
+  switch ((state ?? "").toUpperCase()) {
+    case "SUCCESS":
+      return "success";
+    case "PENDING":
+      return "in-progress";
+    case "FAILURE":
+    case "ERROR":
+      return "failure";
+    default:
+      return "pending";
+  }
+}
+
+/** Only an address a browser can open; a deployer is free to write anything into the field. */
+function toWebUrl(value: string | null | undefined): string | null {
+  const text = trimmed(value);
+  if (text === null) return null;
+  try {
+    const url = new URL(text);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Heroku's review apps report no environment URL; the app's address is in the deployment's
+ * payload as `web_url`. The payload is the deployer's own JSON, read for that one key and
+ * nothing else, and a payload that is not JSON is a deployment with no address.
+ */
+function payloadWebUrl(payload: string | null | undefined): string | null {
+  const text = trimmed(payload);
+  if (text === null) return null;
+  try {
+    const parsed: unknown = JSON.parse(text);
+    const nested: unknown = typeof parsed === "string" ? JSON.parse(parsed) : parsed;
+    return typeof nested === "object" && nested !== null && "web_url" in nested
+      ? toWebUrl(typeof nested.web_url === "string" ? nested.web_url : null)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Netlify keeps no deployment on the host. Its deploy preview is a commit status named
+ * `netlify/<site>/deploy-preview` whose target is the preview itself — the one status whose
+ * target is a site rather than a dashboard, which is what makes it a deployment here and leaves
+ * every other deployer's status in the checks list where it already is.
+ */
+const NETLIFY_DEPLOY_PREVIEW = /^netlify\/(.+)\/deploy-preview$/u;
+
+/**
+ * Every deployment the pull request carries, newest first, one row per deployment a reader
+ * could tell apart: a commit's environment is listed as its newest deployment, and, where that
+ * one is not up, also as the newest one that is — a failed or running redeployment does not
+ * take down the address that still serves. Environments are matched without regard to case,
+ * which is how GitHub itself keeps them. Inactive rows stay: GitHub calls a superseded
+ * deployment inactive, but Vercel's still serve, and a reader comparing two commits wants both.
+ *
+ * A row with nowhere to go is kept only while it says something — queued, deploying, waiting,
+ * failed. A finished deployment with no address, which is what a workflow's `ci` environment
+ * is, is left out: there is nothing to open and nothing to wait for.
+ */
+export function decodePullRequestDeploymentsJson(
+  raw: string,
+): Result.Result<ReadonlyArray<PullRequestDeployment>, DecodeFailure> {
+  const decoded = decodeDeployments(raw);
+  if (!Result.isSuccess(decoded)) return Result.fail(decoded.failure);
+  const pullRequest = decoded.success.data.repository.pullRequest;
+  const headSha = trimmed(pullRequest.headRefOid);
+  type Row = PullRequestDeployment & { readonly createdAt: string };
+  const rows: Row[] = [];
+
+  const newestByCommitAndEnvironment = new Map<string, Row>();
+  const newestUpByCommitAndEnvironment = new Map<string, Row>();
+  let head: PullRequestDeployment["commit"] | null = null;
+  for (const node of pullRequest.commits.nodes) {
+    if (node === null) continue;
+    const sha = trimmed(node.commit.oid);
+    if (sha === null) continue;
+    const commit = {
+      sha,
+      shortSha: trimmed(node.commit.abbreviatedOid) ?? sha.slice(0, 7),
+      headline: trimmed(node.commit.messageHeadline),
+      isHead: headSha !== null && sha === headSha,
+    };
+    if (commit.isHead) head = commit;
+    for (const deployment of node.commit.deployments?.nodes ?? []) {
+      if (deployment === null) continue;
+      const environment =
+        trimmed(deployment.latestEnvironment) ?? trimmed(deployment.environment) ?? "deployment";
+      const status = deployment.latestStatus ?? null;
+      const url = toWebUrl(status?.environmentUrl) ?? payloadWebUrl(deployment.payload);
+      const detailsUrl = toWebUrl(status?.logUrl);
+      const row: Row = {
+        name: environment,
+        deployer: trimmed(deployment.creator?.login),
+        state: toDeploymentState(trimmed(deployment.state), trimmed(status?.state)),
+        url,
+        // Vercel writes the site's own address as its log, which would be the same link twice.
+        detailsUrl: detailsUrl === url ? null : detailsUrl,
+        description: trimmed(status?.description) ?? trimmed(deployment.description),
+        updatedAt:
+          trimmed(status?.updatedAt) ?? trimmed(deployment.updatedAt) ?? deployment.createdAt,
+        commit,
+        createdAt: deployment.createdAt,
+      };
+      const key = `${sha} ${environment.toLowerCase()}`;
+      // ISO-8601 timestamps in UTC compare as text; a tie keeps the later row, since GitHub
+      // lists a redeployment after the deployment it repeats.
+      const newest = newestByCommitAndEnvironment.get(key);
+      if (newest === undefined || newest.createdAt <= row.createdAt) {
+        newestByCommitAndEnvironment.set(key, row);
+      }
+      if (row.state === "success" && row.url !== null) {
+        const newestUp = newestUpByCommitAndEnvironment.get(key);
+        if (newestUp === undefined || newestUp.createdAt <= row.createdAt) {
+          newestUpByCommitAndEnvironment.set(key, row);
+        }
+      }
+    }
+  }
+  for (const [key, newest] of newestByCommitAndEnvironment) {
+    rows.push(newest);
+    const newestUp = newestUpByCommitAndEnvironment.get(key);
+    if (newestUp !== undefined && newestUp !== newest) rows.push(newestUp);
+  }
+
+  if (head !== null) {
+    for (const node of pullRequest.headStatuses?.nodes ?? []) {
+      for (const context of node?.commit.status?.contexts ?? []) {
+        const site =
+          context === null
+            ? undefined
+            : NETLIFY_DEPLOY_PREVIEW.exec(trimmed(context.context) ?? "")?.[1];
+        if (context === null || site === undefined) continue;
+        rows.push({
+          name: site,
+          deployer: trimmed(context.creator?.login) ?? "netlify",
+          state: toStatusDeploymentState(trimmed(context.state)),
+          url: toWebUrl(context.targetUrl),
+          detailsUrl: null,
+          description: trimmed(context.description),
+          updatedAt: trimmed(context.createdAt),
+          commit: head,
+          createdAt: trimmed(context.createdAt) ?? "",
+        });
+      }
+    }
+  }
+
+  return Result.succeed(
+    rows
+      .filter((row) => row.url !== null || (row.state !== "success" && row.state !== "inactive"))
+      .sort((left, right) =>
+        left.createdAt < right.createdAt ? 1 : left.createdAt > right.createdAt ? -1 : 0,
+      )
+      .map(({ createdAt: _createdAt, ...deployment }) => deployment),
+  );
 }
 
 export const PULL_REQUEST_ACTIVITY_JSON_FIELDS = "author,comments,reviews,commits";

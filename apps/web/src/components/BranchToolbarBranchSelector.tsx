@@ -38,6 +38,7 @@ import {
   THREAD_DETAILS_PANEL_CHEVRON_CLASS,
   THREAD_DETAILS_PANEL_ICON_CLASS,
 } from "./chat/threadDetailsPanelStyles";
+import { ThreadDetailsDeploymentsControl } from "./chat/ThreadDetailsDeploymentsControl";
 import { ThreadDetailsPrRows } from "./chat/ThreadDetailsPrRows";
 import { parsePullRequestReference } from "../pullRequestReference";
 import { getSourceControlPresentation } from "../sourceControlPresentation";
@@ -762,6 +763,15 @@ export function BranchToolbarBranchSelector({
             openAriaLabel={prUrl ?? "Open pull request"}
             onOpen={(event) => openPrLink(event, prUrl)}
             onActed={() => branchStatusQuery.refresh()}
+          />
+        ) : null}
+        {displayMode === "panel" && prNumber !== undefined && prUrl !== undefined ? (
+          <ThreadDetailsDeploymentsControl
+            environmentId={environmentId}
+            threadRef={threadRef}
+            number={prNumber}
+            reference={currentLinkedPr}
+            project={activeProject}
           />
         ) : null}
       </div>

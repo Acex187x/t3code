@@ -158,6 +158,56 @@ export const PullRequestCheck = Schema.Struct({
 export type PullRequestCheck = typeof PullRequestCheck.Type;
 
 /**
+ * Where a deployment stands, folded from the deployer's own vocabulary. GitHub alone names eleven
+ * states; a surface has six things to say about one. `waiting` is a deployment held by an
+ * environment's protection rules until somebody approves it, which is not the same wait as
+ * `pending`, since no amount of time ends it. `inactive` covers everything the host has stopped
+ * calling current: superseded by a newer deployment, destroyed when the branch closed, or
+ * abandoned. An inactive deployment may still serve — Vercel's do — so its address is kept.
+ */
+export const PullRequestDeploymentState = Schema.Literals([
+  "pending",
+  "in-progress",
+  "waiting",
+  "success",
+  "failure",
+  "inactive",
+]);
+export type PullRequestDeploymentState = typeof PullRequestDeploymentState.Type;
+
+export const PullRequestDeploymentCommit = Schema.Struct({
+  sha: TrimmedNonEmptyString,
+  shortSha: TrimmedNonEmptyString,
+  headline: Schema.NullOr(Schema.String),
+  /** This commit was the change request's head when the deployments were read. */
+  isHead: Schema.Boolean,
+});
+export type PullRequestDeploymentCommit = typeof PullRequestDeploymentCommit.Type;
+
+/**
+ * One deployment a deployer left against one of the change request's commits: the host's own
+ * record where the deployer keeps one, or a deploy-preview status where that is all it posts.
+ */
+export const PullRequestDeployment = Schema.Struct({
+  /** The environment as the deployer named it: `Preview`, `production`, a Netlify site. */
+  name: TrimmedNonEmptyString,
+  /** Who deploys, as the host names them: `vercel`, `netlify`, `github-actions`. */
+  deployer: Schema.NullOr(TrimmedNonEmptyString),
+  state: PullRequestDeploymentState,
+  /**
+   * Where the deployed result is served. Only an `http(s)` address, since that is what a browser
+   * can open; null where the deployer reported none, which many do until the deployment succeeds.
+   */
+  url: Schema.NullOr(Schema.String),
+  /** The deployer's own page about this deployment — its log, inspector, or dashboard. */
+  detailsUrl: Schema.NullOr(Schema.String),
+  description: Schema.NullOr(Schema.String),
+  updatedAt: Schema.NullOr(IsoDateTime),
+  commit: PullRequestDeploymentCommit,
+});
+export type PullRequestDeployment = typeof PullRequestDeployment.Type;
+
+/**
  * The reactions a remark can carry. GitHub's eight, which is also what the picker offers: GitLab
  * accepts any emoji as an award, and the ones outside this set are read as nothing rather than
  * shown under a name no other host would recognise.
@@ -442,6 +492,12 @@ export const PullRequestCapabilities = Schema.Struct({
    * to change them, which is what every server before this field was.
    */
   labels: Schema.optional(Schema.Boolean),
+  /**
+   * The host records deployments against commits, so a change request's deployments can be
+   * read on request. Optional for the same reason as `labels`: a server that says nothing has
+   * no such read, which is what every server before this field was.
+   */
+  deployments: Schema.optional(Schema.Boolean),
 });
 export type PullRequestCapabilities = typeof PullRequestCapabilities.Type;
 

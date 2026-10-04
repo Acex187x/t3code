@@ -66,3 +66,38 @@ export function useOpenLink(threadRef: ScopedThreadRef | null | undefined): (
     [openPreview, threadRef],
   );
 }
+
+/**
+ * The two places a link can go, each on its own, for a control that offers both rather than
+ * following the setting: an "Open in integrated browser" beside an "Open in system browser".
+ * `canOpenInApp` is false where the first has nowhere to go — no thread to open beside, or a
+ * runtime without the in-app browser — so the control can leave it out instead of offering a
+ * button that falls through to the other.
+ */
+export function useOpenLinkIn(threadRef: ScopedThreadRef | null | undefined): {
+  readonly canOpenInApp: boolean;
+  readonly openInApp: (url: string) => Promise<void>;
+  readonly openExternal: (url: string) => Promise<void>;
+} {
+  const openPreview = useAtomCommand(previewEnvironment.open, { reportFailure: false });
+  const canOpenInApp = canOpenLinksInApp(Boolean(threadRef));
+  const openInApp = useCallback(
+    async (url: string) => {
+      if (!threadRef) throw new Error("The integrated browser needs a thread to open beside.");
+      const result = await openUrlInPreview({ threadRef, url, openPreview });
+      if (isAtomCommandInterrupted(result)) return;
+      if (result._tag === "Success") {
+        recordVisitForThread(threadRef, url);
+        return;
+      }
+      throw squashAtomCommandFailure(result);
+    },
+    [openPreview, threadRef],
+  );
+  const openExternal = useCallback(async (url: string) => {
+    const api = readLocalApi();
+    if (!api) throw new Error("Link opening is unavailable.");
+    await api.shell.openExternal(url);
+  }, []);
+  return { canOpenInApp, openInApp, openExternal };
+}

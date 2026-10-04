@@ -135,6 +135,24 @@ PR creation from Git actions continue to use the project's environment.
 For Azure DevOps, use the host website to change comments. Bitbucket does not support reopening a
 declined pull request.
 
+### Open a deployment
+
+When an open GitHub pull request has deployments, such as a Vercel or Netlify preview, a Heroku
+review app, or a GitHub Actions environment, a **Deployments** button appears among the review
+header's actions and the Summary tab gets a **Deployments** section. Both list each recent commit's
+deployments, newest first, so you can open the build before a fix-up as well as the latest one.
+Click an entry to open it where your **Open links in** setting says, use its button to open it in
+the system browser, or right-click it for both browsers and a copy. In the thread details panel,
+**Open deployment** under the pull request row opens the newest one that is up, and its menu lists
+the rest. Hold `Cmd` or `Ctrl` while clicking to open in the system browser regardless of the
+setting. An entry that is still queued, deploying, or waiting for an environment's approval has
+nothing to open yet; its icon shows the state, and hovering it says why.
+
+Deployments come from GitHub's deployments API, plus Netlify's deploy-preview status, which is the
+one deploy status whose link is the site itself. Other deployers that post only a dashboard link
+stay in the checks list. GitLab, Bitbucket, Azure DevOps, and Forgejo reviews do not list
+deployments. On mobile, open the pull request on the host.
+
 ### Mark files as viewed
 
 Tick a file off in the **Code** tab once you have read it and it collapses; the toolbar keeps a

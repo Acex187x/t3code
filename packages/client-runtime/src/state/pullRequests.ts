@@ -246,6 +246,13 @@ export function createPullRequestEnvironmentAtoms<R, E>(
       staleTimeMs: 45_000,
       refreshTrigger: ({ environmentId }) => refreshes({ environmentId, input: {} }),
     }),
+    deployments: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:pull-requests:deployments",
+      tag: WS_METHODS.pullRequestsDeployments,
+      execute: (input) => routedRequest(WS_METHODS.pullRequestsDeployments, input),
+      staleTimeMs: 60_000,
+      refreshTrigger: ({ environmentId }) => refreshes({ environmentId, input: {} }),
+    }),
     activity,
     threadComments: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:pull-requests:thread-comments",

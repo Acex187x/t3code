@@ -4,6 +4,7 @@ import type {
   PullRequestCheck,
   PullRequestCheckStatus,
   PullRequestChecksState,
+  PullRequestDeploymentState,
   PullRequestLabel,
   PullRequestMergeability,
   PullRequestReviewDecision,
@@ -253,6 +254,59 @@ export function PullRequestCheckStatusIcon({ status }: { status: PullRequestChec
     <presentation.Icon
       aria-hidden
       className={cn("size-3.5 shrink-0", presentation.toneClassName)}
+    />
+  );
+}
+
+/**
+ * A deployment's state, worded the way a reader thinks about an environment rather than a job:
+ * "Live" is the one they can open, and "Waiting for approval" says why the queue is not moving.
+ * The tones are the checks' own, so the two indicators side by side read as one vocabulary.
+ */
+const DEPLOYMENT_STATE_PRESENTATION = {
+  pending: {
+    label: "Queued",
+    Icon: CircleDotIcon,
+    toneClassName: "text-amber-600 dark:text-amber-400/90",
+  },
+  "in-progress": { label: "Deploying", Icon: Spinner, toneClassName: "text-amber-500" },
+  waiting: {
+    label: "Waiting for approval",
+    Icon: CircleDotIcon,
+    toneClassName: "text-amber-600 dark:text-amber-400/90",
+  },
+  success: {
+    label: "Live",
+    Icon: CircleCheckIcon,
+    toneClassName: "text-emerald-600 dark:text-emerald-300/90",
+  },
+  failure: { label: "Failed", Icon: CircleXIcon, toneClassName: "text-destructive" },
+  inactive: {
+    label: "Inactive",
+    Icon: CircleDashedIcon,
+    toneClassName: "text-muted-foreground/70",
+  },
+} as const satisfies Record<
+  PullRequestDeploymentState,
+  { label: string; Icon: typeof CircleCheckIcon | typeof Spinner; toneClassName: string }
+>;
+
+export function pullRequestDeploymentStatePresentation(state: PullRequestDeploymentState) {
+  return DEPLOYMENT_STATE_PRESENTATION[state];
+}
+
+export function PullRequestDeploymentStateIcon({
+  state,
+  className,
+}: {
+  state: PullRequestDeploymentState;
+  className?: string;
+}) {
+  const presentation = DEPLOYMENT_STATE_PRESENTATION[state];
+  return (
+    <presentation.Icon
+      aria-hidden
+      className={cn("size-3.5 shrink-0", presentation.toneClassName, className)}
     />
   );
 }

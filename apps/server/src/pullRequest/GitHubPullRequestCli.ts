@@ -36,6 +36,7 @@ import {
   type PullRequestLabelCandidateList,
   type PullRequestThreadCommentsResult,
   type PullRequestUpdateMethod,
+  type PullRequestDeployment,
   type PullRequestPreview,
 } from "@t3tools/contracts";
 
@@ -53,6 +54,8 @@ import {
   decodePullRequestDetailJson,
   decodePullRequestCoreJson,
   pullRequestCoreGraphQlQuery,
+  PULL_REQUEST_DEPLOYMENTS_GRAPHQL_QUERY,
+  decodePullRequestDeploymentsJson,
   type GitHubPullRequestCore,
   type GitHubPullRequestSummary,
   decodePullRequestPreviewJson,
@@ -572,6 +575,18 @@ export class GitHubPullRequestCli extends Context.Service<
       readonly headRepositoryOwner: string;
       readonly isCrossRepository: true;
     }) => Effect.Effect<ReadonlyArray<GitHubWorkflowRunApproval>, GitHubPullRequestCliError>;
+
+    /**
+     * The newest deployment of each environment recorded against the pull request's recent
+     * commits, newest first. A read of its own, so a token that cannot read deployments fails
+     * this and nothing else.
+     */
+    readonly getPullRequestDeployments: (input: {
+      readonly cwd: string;
+      readonly repository: string;
+      readonly host: string;
+      readonly number: number;
+    }) => Effect.Effect<ReadonlyArray<PullRequestDeployment>, GitHubPullRequestCliError>;
 
     /**
      * The host-native stack this pull request is in, or null when it is in none — which is also
@@ -2112,6 +2127,21 @@ export const make = Effect.gen(function* () {
       });
     },
     listWorkflowRunsRequiringApproval,
+    getPullRequestDeployments: (input) => {
+      const { owner, name } = parseRepositorySelector(input.repository);
+      return graphqlRead({
+        cwd: input.cwd,
+        host: input.host,
+        operation: "getPullRequestDeployments",
+        variables: [
+          ["-f", `owner=${owner}`],
+          ["-f", `name=${name}`],
+          ["-F", `number=${input.number}`],
+        ],
+        query: PULL_REQUEST_DEPLOYMENTS_GRAPHQL_QUERY,
+        decode: decodePullRequestDeploymentsJson,
+      });
+    },
 
     getPullRequestStack: (input) => {
       const { owner, name } = parseRepositorySelector(input.repository);

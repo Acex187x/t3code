@@ -3262,6 +3262,52 @@ layer("GitHubPullRequestCli.layer", (it) => {
     }),
   );
 
+  it.effect("reads deployments with a request of their own", () =>
+    Effect.gen(function* () {
+      const deployment = {
+        environment: "Preview",
+        state: "ACTIVE",
+        createdAt: "2026-07-02T00:00:00Z",
+        creator: { login: "vercel" },
+        latestStatus: { state: "SUCCESS", environmentUrl: "https://web-abc.vercel.app" },
+      };
+      mockedExecute.mockReturnValueOnce(
+        Effect.succeed(
+          output(
+            encodeJson({
+              data: {
+                repository: {
+                  pullRequest: {
+                    headRefOid: "abc123",
+                    commits: {
+                      nodes: [{ commit: { oid: "abc123", deployments: { nodes: [deployment] } } }],
+                    },
+                  },
+                },
+              },
+            }),
+          ),
+        ),
+      );
+      const cli = yield* GitHubPullRequestCli.GitHubPullRequestCli;
+
+      const deployments = yield* cli.getPullRequestDeployments({
+        cwd: "/w",
+        repository: "acme/web",
+        host: "github.com",
+        number: 7,
+      });
+
+      expect(deployments.map((entry) => [entry.name, entry.state, entry.url])).toEqual([
+        ["Preview", "success", "https://web-abc.vercel.app/"],
+      ]);
+      const args = mockedExecute.mock.calls[0]?.[0].args ?? [];
+      expect(args.slice(0, 4)).toEqual(["api", "graphql", "--hostname", "github.com"]);
+      expect(args.at(-1)).toContain("deployments(first: 100");
+      expect(args.at(-1)).not.toContain("statusCheckRollup");
+    }),
+  );
+
   it.effect("fails the read when gh returns something unreadable", () =>
     Effect.gen(function* () {
       mockedExecute.mockReturnValueOnce(Effect.succeed(output('{"message":"not found"}')));

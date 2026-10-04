@@ -759,6 +759,15 @@ export function PullRequestDetailPanel({
       description: error.message,
     });
   }, []);
+  // Read on request, not with the detail: a host that keeps no deployments is never asked, a
+  // closed change has nothing left to open, and the server's own readers of the detail never
+  // pay for a list only a person looks at.
+  const deploymentsQuery = useEnvironmentQuery(
+    detail !== null && detail.capabilities.deployments === true && detail.state === "open"
+      ? pullRequestEnvironment.deployments({ environmentId, input: reference })
+      : null,
+  );
+  const deployments = deploymentsQuery.data ?? [];
   const branchRefsQuery = useEnvironmentQuery(
     detail === null
       ? null
@@ -2700,6 +2709,7 @@ export function PullRequestDetailPanel({
                   threadRef={threadRef}
                   reference={reference}
                   detail={detail}
+                  deployments={deployments}
                   activityPending={activityPending}
                   checksStale={checksStale}
                   activityError={activityError}

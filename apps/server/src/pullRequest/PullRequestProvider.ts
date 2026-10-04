@@ -9,6 +9,7 @@ import type {
   PullRequestCapabilities,
   PullRequestChecksState,
   PullRequestCheck,
+  PullRequestDeployment,
   PullRequestChecks,
   PullRequestComment,
   PullRequestFileViewed,
@@ -415,6 +416,15 @@ export interface PullRequestProviderApi {
   readonly getChangeRequestChecks?: (
     input: ProviderRepositoryRef & { readonly number: number },
   ) => Effect.Effect<PullRequestChecks, PullRequestProviderError>;
+
+  /**
+   * The deployments left against the change request's recent commits, newest first. Absent
+   * from a host that keeps no such record; a host that has it answers an empty list for a
+   * change request nobody has deployed.
+   */
+  readonly getChangeRequestDeployments?: (
+    input: ProviderRepositoryRef & { readonly number: number },
+  ) => Effect.Effect<ReadonlyArray<PullRequestDeployment>, PullRequestProviderError>;
 
   readonly getChangeRequest: (
     input: ProviderRepositoryRef & { readonly number: number },
